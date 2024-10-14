@@ -16,6 +16,37 @@ from utils import (
 )
 from typing import Union, Callable, Optional
 from tqdm import tqdm
+import envs
+import gym
+
+OBS_ELEMENT_INDICES = {
+    "bottom burner": np.array([11, 12]),
+    "top burner": np.array([15, 16]),
+    "light switch": np.array([17, 18]),
+    "slide cabinet": np.array([19]),
+    "hinge cabinet": np.array([20, 21]),
+    "microwave": np.array([22]),
+    "kettle": np.array([23, 24, 25, 26, 27, 28, 29]),
+}
+OBS_ELEMENT_GOALS = {
+    "bottom burner": np.array([-0.88, -0.01]),
+    "top burner": np.array([-0.92, -0.01]),
+    "light switch": np.array([-0.69, -0.05]),
+    "slide cabinet": np.array([0.37]),
+    "hinge cabinet": np.array([0.0, 1.45]),
+    "microwave": np.array([-0.75]),
+    "kettle": np.array([-0.23, 0.75, 1.62, 0.99, 0.0, 0.0, -0.06]),
+}
+
+ALL_TASKS = [
+    "bottom burner",
+    "top burner",
+    "light switch",
+    "slide cabinet",
+    "hinge cabinet",
+    "microwave",
+    "kettle",
+]
 
 
 class RelayKitchenTrajectoryDataset(TensorDataset):
@@ -29,13 +60,56 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             observations, actions, masks
         )
         self.masks = masks
+        self.options = self.set_options(observations)
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
             torch.from_numpy(masks).to(device).float(),
+            torch.from_numpy(self.options).to(device).int()
         )
+        # self.visualize()
         self.actions = self.tensors[1]
 
+    def visualize(self):
+        import gym 
+        env = gym.make('kitchen-all-v0')
+        import time
+        env.reset()
+        env.render()
+
+        for obs, acts, masks, opts in self:
+            print("NEW TRAJECTORY")
+            env.reset()
+            env.render()
+            for act, opt,mask in zip(acts, opts, masks):
+                time.sleep(0.3)
+                print("Option", ALL_TASKS[opt.item()])
+                env.step(act.numpy())
+                env.render()
+                if not mask:
+                    break
+
+    def set_options(self, observations):
+        true_options = []
+        for episode in observations:
+            args = []
+            for GOAL in ALL_TASKS:
+                obj_state = episode[:, OBS_ELEMENT_INDICES[GOAL]]
+                obj_goal = OBS_ELEMENT_GOALS[GOAL]
+                arg = np.ceil(np.linalg.norm(obj_state - obj_goal, axis=1)*100).argmin()
+                args.append(arg)
+
+            opts = np.zeros(len(episode), int)
+            sorted_args = np.argsort(args)
+            opts[:args[sorted_args[0]]] = sorted_args[0]
+            for idx, (arg1, arg2) in enumerate(zip(sorted_args[:-1], sorted_args[1:])):
+                opts[args[arg1]:args[arg2]] = arg2
+            # opts[args[arg2]:] = idx+1
+
+            true_options.append(opts)
+
+        return np.stack(true_options)
+    
     def get_seq_length(self, idx):
         return int(self.masks[idx].sum().item())
 

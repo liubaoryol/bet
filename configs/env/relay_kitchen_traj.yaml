@@ -6,7 +6,7 @@ action_dim: 9
 action_min: null
 action_max: null
 
-load_dir: "/absolute/path/to/training_run/directory"
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.11/121746_kitchen_train"
 
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
