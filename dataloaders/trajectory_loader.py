@@ -50,7 +50,7 @@ ALL_TASKS = [
 
 
 class RelayKitchenTrajectoryDataset(TensorDataset):
-    def __init__(self, data_directory, device="cpu"):
+    def __init__(self, data_directory, device="cpu", keep_option=6):
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -59,13 +59,17 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         observations, actions, masks = transpose_batch_timestep(
             observations, actions, masks
         )
+        options = self.set_options(observations)
+        self.options = options
+        if keep_option is not None:
+            masks[options!=keep_option]=0
         self.masks = masks
-        self.options = self.set_options(observations)
+
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
             torch.from_numpy(masks).to(device).float(),
-            torch.from_numpy(self.options).to(device).int()
+            # torch.from_numpy(options).to(device).int()
         )
         # self.visualize()
         self.actions = self.tensors[1]
@@ -118,7 +122,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         # mask out invalid actions
         for i in range(len(self.masks)):
             T = int(self.masks[i].sum())
-            result.append(self.actions[i, :T, :])
+            result.append(self.actions[i, self.masks[i].astype(bool), :])
         return torch.cat(result, dim=0)
 
 
@@ -388,8 +392,13 @@ class TrajectorySlicerDataset(Dataset):
             if T - window < 0:
                 print(f"Ignored short sequence #{i}: len={T}, window={window}")
             else:
+                masks = self.masks(i)
+                idxs = np.where(masks)[0]
+                # if len(idxs)<=0:
+                #     import pdb; pdb.set_trace()
+                idx_st, idx_end = idxs[0], idxs[-1]
                 self.slices += [
-                    (i, start, start + window) for start in range(T - window)
+                    (i, start, start + window) for start in range(idx_st, idx_end + 1 - window) if masks[start:start+window].sum()==window
                 ]  # slice indices follow convention [start, end)
 
             if min_seq_length < window:
@@ -421,6 +430,11 @@ class TrajectorySlicerDataset(Dataset):
 
 
 class TrajectorySlicerSubset(TrajectorySlicerDataset):
+    def masks(self, idx):
+        # return self.dataset.dataset.masks[idx]
+        subset = self.dataset
+        return subset.dataset.masks[subset.indices[idx]]
+
     def _get_seq_length(self, idx: int) -> int:
         # self.dataset is a torch.dataset.Subset, so we need to use the parent dataset
         # to extract the true seq length.

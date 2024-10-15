@@ -6,7 +6,35 @@ action_dim: 9
 action_min: null
 action_max: null
 
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.11/121746_kitchen_train"
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/111357_kitchen_train"  # option: 0 bottom burner 10/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/111331_kitchen_train"  # option: 1 top burner 0/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/111414_kitchen_train"  # option: 2 light switch  0/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/113129_kitchen_train"  # option: 3 slide cabinet  0/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/113144_kitchen_train"  # option: 4 hinge cabinet 0/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/113207_kitchen_train"  # option: 5 microwave 20/20
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/113251_kitchen_train"  # option: 6 kettle 19/20
+
+# trained for 150 epochs
+load_dir: 
+  d1: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/134030_kitchen_train"  # option: 0 bottom burner 10/20
+  d2: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/134044_kitchen_train"  # option: 1 top burner 0/20
+  d3: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/134100_kitchen_train"  # option: 2 light switch  0/20
+  d4: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/134114_kitchen_train"  # option: 3 slide cabinet  0/20
+  d5: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/134259_kitchen_train"  # option: 4 hinge cabinet 0/20
+  d6: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/140831_kitchen_train"  # option: 5 microwave 20/20
+  d7: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/140908_kitchen_train"  # option: 6 kettle 19/20
+
+
+# Trained for 500
+# trained for 150 epochs
+# load_dir: 
+#   d1: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/"  # option: 0 bottom burner 10/20
+#   d2: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/"  # option: 1 top burner 0/20
+#   d3: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/141836_kitchen_train"  # option: 2 light switch  0/20
+#   d4: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/141848_kitchen_train"  # option: 3 slide cabinet  0/20
+#   d5: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/141905_kitchen_train"  # option: 4 hinge cabinet 0/20
+  # d6: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/142014_kitchen_train"  # option: 5 microwave 20/20
+  # d7: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.14/142053_kitchen_train"  # option: 6 kettle 19/20
 
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace

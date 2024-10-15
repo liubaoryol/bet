@@ -32,9 +32,10 @@ class Workspace:
             )
 
         # Create the model
-        self.action_ae = None
-        self.obs_encoding_net = None
-        self.state_prior = None
+        self.action_ae = not None
+        self.obs_encoding_net = not None
+        self.state_prior = not None
+        self.delay = np.inf
         if not self.cfg.lazy_init_models:
             self._init_action_ae()
             self._init_obs_encoding_net()
@@ -42,7 +43,9 @@ class Workspace:
 
         wandb.init(dir=self.work_dir, project=cfg.project, config=cfg._content)
         self.epoch = 0
-        self.load_snapshot()
+        self.latent_order = [ 5, 6, 0,1,3,4, 3, 4, 0, 1]
+        self.curr_idx = 0
+        self.load_snapshots()
 
         # Set up history archival.
         self.window_size = cfg.window_size
@@ -120,6 +123,17 @@ class Workspace:
             if self.cfg.enable_render:
                 self.env.render(mode="human")
             obs, reward, done, info = self.env.step(action)
+            if reward==1:
+                if self.latent_order[self.curr_idx]!=6:
+                    self.curr_idx+=1
+                else:
+                    self.delay = 0
+                # self.curr_idx += 1
+            if self.delay<10:
+                self.delay+=1
+            elif self.delay==10:
+                self.delay=np.inf
+                self.curr_idx += 1
             total_reward += reward
             if obs is None:
                 obs = last_obs  # use cached observation in case of `None` observation
@@ -144,11 +158,15 @@ class Workspace:
         raise NotImplementedError
 
     def _get_action(self, obs, sample=False, keep_last_bins=False):
+        option = self.latent_order[self.curr_idx]
+        action_ae = self.action_aes[option]
+        obs_encoding_net = self.obs_encoding_nets[option]
+        state_prior = self.state_priors[option]
         with utils.eval_mode(
-            self.action_ae, self.obs_encoding_net, self.state_prior, no_grad=True
+            action_ae, obs_encoding_net, state_prior, no_grad=True
         ):
             obs = torch.from_numpy(obs).float().to(self.cfg.device).unsqueeze(0)
-            enc_obs = self.obs_encoding_net(obs).squeeze(0)
+            enc_obs = obs_encoding_net(obs).squeeze(0)
             enc_obs = einops.repeat(
                 enc_obs, "obs -> batch obs", batch=self.cfg.action_batch_size
             )
@@ -158,7 +176,7 @@ class Workspace:
             if self.cfg.use_state_prior:
                 enc_obs_seq = torch.stack(tuple(self.history), dim=0)  # type: ignore
                 # Sample latents from the prior
-                latents = self.state_prior.generate_latents(
+                latents = state_prior.generate_latents(
                     enc_obs_seq,
                     torch.ones_like(enc_obs_seq).mean(dim=-1),
                 )
@@ -188,10 +206,10 @@ class Workspace:
                 else:
                     action_latents = latents[:, -1:, :]
             else:
-                action_latents = self.action_ae.sample_latents(
+                action_latents = action_ae.sample_latents(
                     num_latents=self.cfg.action_batch_size
                 )
-            actions = self.action_ae.decode_actions(
+            actions = action_ae.decode_actions(
                 latent_action_batch=action_latents,
                 input_rep_batch=enc_obs,
             )
@@ -216,6 +234,7 @@ class Workspace:
             self._init_obs_encoding_net()
             self._init_state_prior()
         for i in range(self.cfg.num_eval_eps):
+            self.curr_idx = 0
             reward, obses, actions, latents, info = self.run_single_episode()
             rewards.append(reward)
             infos.append(info)
@@ -229,6 +248,10 @@ class Workspace:
     @property
     def snapshot(self):
         return Path(self.cfg.load_dir or self.work_dir) / "snapshot.pt"
+
+    @property
+    def snapshots(self):
+        return [Path(d) / "snapshot.pt" for d in self.cfg.load_dir.values()]
 
     def load_snapshot(self):
         keys_to_load = ["action_ae", "obs_encoding_net", "state_prior"]
@@ -245,3 +268,23 @@ class Workspace:
                 "Snapshot does not contain the following keys: "
                 f"{set(keys_to_load) - set(loaded_keys)}"
             )
+    
+    def load_snapshots(self):
+        self.action_aes = []
+        self.obs_encoding_nets = []
+        self.state_priors = []
+        keys_to_load = ["action_ae", "obs_encoding_net", "state_prior"]
+        for snapshot in self.snapshots:
+            with snapshot.open("rb") as f:
+                payload = torch.load(f, map_location=self.device)
+            loaded_keys = []
+            for k, v in payload.items():
+                if k in keys_to_load:
+                    loaded_keys.append(k)
+                    self.__dict__[k+'s'].append(v.to(self.cfg.device))
+
+            if len(loaded_keys) != len(keys_to_load):
+                raise ValueError(
+                    "Snapshot does not contain the following keys: "
+                    f"{set(keys_to_load) - set(loaded_keys)}"
+                )

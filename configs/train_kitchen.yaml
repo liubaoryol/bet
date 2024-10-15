@@ -30,7 +30,7 @@ grad_norm_clip: 1.0
 seed: 42
 
 # Prior training details
-num_prior_epochs: 50
+num_prior_epochs: 500
 eval_prior_every: 1
 save_prior_every: 1
 
