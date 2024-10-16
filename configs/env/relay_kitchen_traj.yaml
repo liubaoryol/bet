@@ -1,12 +1,17 @@
 name: kitchen-all-v0
 args: []
-kwargs: {}
+kw_init_option_modelargs: {}
 obs_dim: 60
 action_dim: 9
 action_min: null
 action_max: null
 
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.11/121746_kitchen_train"
+# BeT baseline
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/105443_kitchen_train"
+# BeT with zero option but skip connection
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
+# Hierarchical BeT
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
 
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace

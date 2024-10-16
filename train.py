@@ -36,13 +36,14 @@ class Workspace:
         self.action_ae = None
         self.obs_encoding_net = None
         self.state_prior = None
+        self.option_model = None
         if not self.cfg.lazy_init_models:
             self._init_action_ae()
             self._init_obs_encoding_net()
             self._init_state_prior()
 
         self.log_components = OrderedDict()
-        self.epoch = self.prior_epoch = 0
+        self.epoch = self.prior_epoch = self.option_epoch = 0
 
         self.save_training_latents = False
         self._training_latents = []
@@ -87,6 +88,11 @@ class Workspace:
                 weight_decay=self.cfg.weight_decay,
                 betas=tuple(self.cfg.betas),
             )
+            self.option_optimizer = self.state_prior.get_option_optimizer(
+                learning_rate=self.cfg.lr,
+                weight_decay=self.cfg.weight_decay,
+                betas=tuple(self.cfg.betas),
+            )
 
     def _setup_loaders(self):
         self.train_loader = DataLoader(
@@ -112,6 +118,23 @@ class Workspace:
             num_workers=self.cfg.num_workers,
             pin_memory=True,
         )
+    def train_option(self):
+        self.state_prior.train()
+        with utils.eval_mode(self.obs_encoding_net, self.action_ae):
+            pbar = tqdm.tqdm(
+                self.train_loader, desc=f"Training option epoch {self.option_epoch}"
+            )
+        for data in pbar:
+                observations, action, mask, option = data
+                self.option_optimizer.zero_grad(set_to_none=True)
+                obs, act = observations.to(self.device), action.to(self.device)
+                enc_obs = self.obs_encoding_net(obs)
+                # import pdb; pdb.set_trace()
+                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
+                loss2.backward()
+                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
+                torch.nn.utils.clip_grad_norm_(self.state_prior.option_model.parameters(), self.cfg.grad_norm_clip)
+                self.option_optimizer.step()
 
     def train_prior(self):
         self.state_prior.train()
@@ -120,37 +143,56 @@ class Workspace:
                 self.train_loader, desc=f"Training prior epoch {self.prior_epoch}"
             )
             for data in pbar:
-                observations, action, mask = data
+                observations, action, mask, option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
                 _, loss, loss_components = self.state_prior.get_latent_and_loss(
-                    obs_rep=enc_obs,
+                    obs_rep=(enc_obs, option),
                     target_latents=latent,
                     return_loss_components=True,
                 )
                 loss.backward()
+                
+                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
+                loss2.backward()
+
                 torch.nn.utils.clip_grad_norm_(
                     self.state_prior.parameters(), self.cfg.grad_norm_clip
                 )
                 self.state_prior_optimizer.step()
+                self.option_optimizer.step()
+                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
                 self.log_append("prior_train", len(observations), loss_components)
 
     def eval_prior(self):
         with utils.eval_mode(
             self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
         ):
-            for observations, action, mask in self.test_loader:
+            for observations, action, mask, option in self.test_loader:
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
                 _, loss, loss_components = self.state_prior.get_latent_and_loss(
-                    obs_rep=enc_obs,
+                    obs_rep=(enc_obs, option),
                     target_latents=latent,
                     return_loss_components=True,
                 )
                 self.log_append("prior_eval", len(observations), loss_components)
+
+                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
+                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
+
+    def eval_option(self):
+        with utils.eval_mode(
+            self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
+        ):
+            for observations, action, mask, option in self.test_loader:
+                obs, act = observations.to(self.device), action.to(self.device)
+                enc_obs = self.obs_encoding_net(obs)
+                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
+                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
 
     def run(self):
         snapshot = self.snapshot
@@ -168,16 +210,30 @@ class Workspace:
         )
         if self.cfg.save_latents:
             self.save_latents()
-
-        # Train the action prior model.
+        
+        # Train the action prior and option model.
         if self.cfg.lazy_init_models:
             self._init_state_prior()
+        self.log_components = OrderedDict()
+        # Reset the log.
+        # self.option_model_iterator = tqdm.trange(
+        #     self.option_epoch, 50
+        # )
+        # self.option_model_iterator.set_description("Training option model: ")
+        # for epoch in self.option_model_iterator:
+        #     self.option_epoch = epoch
+        #     self.train_option()
+        #     if ((self.option_epoch + 1) % self.cfg.eval_prior_every) == 0:
+        #         self.eval_option()
+        #     self.flush_log(epoch=epoch + self.epoch, iterator=self.option_model_iterator)
+        #     self.option_epoch += 1
+
+
         self.state_prior_iterator = tqdm.trange(
             self.prior_epoch, self.cfg.num_prior_epochs
         )
         self.state_prior_iterator.set_description("Training prior: ")
-        # Reset the log.
-        self.log_components = OrderedDict()
+
         for epoch in self.state_prior_iterator:
             self.prior_epoch = epoch
             self.train_prior()
@@ -209,7 +265,7 @@ class Workspace:
             "obs_encoding_net",
             "epoch",
             "prior_epoch",
-            "state_prior",
+            "state_prior"
         ]
         payload = {k: self.__dict__[k] for k in self._keys_to_save}
         with self.snapshot.open("wb") as f:
@@ -218,7 +274,7 @@ class Workspace:
     def save_latents(self):
         total_mse_loss = 0
         with utils.eval_mode(self.action_ae, self.obs_encoding_net, no_grad=True):
-            for observations, action, mask in self.latent_collection_loader:
+            for observations, action, mask, _ in self.latent_collection_loader:
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)

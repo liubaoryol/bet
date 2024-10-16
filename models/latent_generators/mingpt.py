@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import einops
 import models.latent_generators.latent_generator as latent_generator
 
-import models.libraries.mingpt.model as mingpt_model
+import models.libraries.mingpt.skip_gpt as mingpt_model
+import models.libraries.mingpt.model as option_model
 import models.libraries.mingpt.trainer as mingpt_trainer
 from models.libraries.loss_fn import FocalLoss, soft_cross_entropy
 
@@ -64,6 +65,8 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         )
 
         self.model = mingpt_model.GPT(gpt_config)
+        self.option_model = option_model.GPT(gpt_config)
+        # self.option_model.option_embedding = self.model.option_embedding
 
     def get_latent_and_loss(
         self,
@@ -147,11 +150,11 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 return logits, loss
 
     def generate_latents(
-        self, seq_obses: torch.Tensor, seq_masks: torch.Tensor
+        self, seq_obses: torch.Tensor, seq_masks: torch.Tensor, option=None
     ) -> torch.Tensor:
         seq, batch, embed = seq_obses.size()
         obs_rep = einops.rearrange(seq_obses, "seq batch embed -> batch seq embed")
-        output, _ = self.model(obs_rep, None)
+        output, _ = self.model((obs_rep, option), None)
         if self.predict_offsets:
             logits = output[:, :, : self.vocab_size]
             offsets = output[:, :, self.vocab_size :]
@@ -163,6 +166,8 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             )
         else:
             logits = output
+        next_option = F.softmax(self.option_model((obs_rep, option))[0], -1)
+        next_option = torch.multinomial(next_option.view(-1, next_option.shape[-1]), num_samples=1)
         probs = F.softmax(logits, dim=-1)
         batch, seq, choices = probs.shape
         # Sample from the multinomial distribution, one per row.
@@ -175,9 +180,9 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 torch.arange(offsets.shape[0]), sampled_data.flatten()
             ].view(batch, seq, self.action_dim)
 
-            return (sampled_data, sampled_offsets)
+            return (sampled_data, sampled_offsets), next_option[-1].unsqueeze(0)
         else:
-            return sampled_data
+            return sampled_data, next_option[-1].unsqueeze(0)
 
     def get_optimizer(
         self, weight_decay: float, learning_rate: float, betas: Tuple[float, float]
@@ -186,3 +191,12 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
         )
         return self.model.configure_optimizers(trainer_cfg)
+
+    def get_option_optimizer(
+            self, weight_decay: float, learning_rate:float, betas:Tuple[float, float]
+    ) -> torch.optim.Optimizer:
+        
+        trainer_cfg = mingpt_trainer.TrainerConfig(
+            weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
+        )
+        return self.option_model.configure_optimizers(trainer_cfg)

@@ -47,6 +47,7 @@ class Workspace:
         # Set up history archival.
         self.window_size = cfg.window_size
         self.history = deque(maxlen=self.window_size)
+        self.option_history = deque(maxlen=self.window_size)
         self.last_latents = None
 
         if self.cfg.flatten_obs:
@@ -102,10 +103,12 @@ class Workspace:
         action_history = []
         latent_history = []
         obs = self.env.reset()
+        # initial option distribution has not been trained so will start with 0
+        option = torch.Tensor([[5]]).to(torch.int).to(self.device)
         last_obs = obs
         if self.cfg.start_from_seen:
             obs = self._start_from_known()
-        action, latents = self._get_action(obs, sample=True, keep_last_bins=False)
+        action, latents, option = self._get_action(obs, sample=True, keep_last_bins=False, option=option)
         done = False
         total_reward = 0
         obs_history.append(obs)
@@ -126,8 +129,8 @@ class Workspace:
             else:
                 last_obs = obs  # cache valid observation
             keep_last_bins = ((i + 1) % self.cfg.action_update_every) != 0
-            action, latents = self._get_action(
-                obs, sample=True, keep_last_bins=keep_last_bins
+            action, latents, option = self._get_action(
+                obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
             obs_history.append(obs)
             action_history.append(action)
@@ -143,7 +146,7 @@ class Workspace:
         print(obs, chosen_action, done)
         raise NotImplementedError
 
-    def _get_action(self, obs, sample=False, keep_last_bins=False):
+    def _get_action(self, obs, sample=False, keep_last_bins=False, option=None):
         with utils.eval_mode(
             self.action_ae, self.obs_encoding_net, self.state_prior, no_grad=True
         ):
@@ -154,13 +157,21 @@ class Workspace:
             )
             # Now, add to history. This automatically handles the case where
             # the history is full.
+
+            # import pdb; pdb.set_trace()
             self.history.append(enc_obs)
+            self.option_history.append(option)
             if self.cfg.use_state_prior:
                 enc_obs_seq = torch.stack(tuple(self.history), dim=0)  # type: ignore
+                try:
+                    option = torch.concatenate(tuple(self.option_history), dim=1)
+                except:
+                    import pdb; pdb.set_trace()
                 # Sample latents from the prior
-                latents = self.state_prior.generate_latents(
+                latents, option = self.state_prior.generate_latents(
                     enc_obs_seq,
                     torch.ones_like(enc_obs_seq).mean(dim=-1),
+                    option=option
                 )
                 # For visualization, also get raw logits and offsets
                 # placeholder_target = (
@@ -206,7 +217,7 @@ class Workspace:
                 actions = einops.rearrange(
                     actions, "batch 1 action_dim -> batch action_dim"
                 )
-            return actions, (logits_to_save, offsets_to_save, action_latents)
+            return actions, (logits_to_save, offsets_to_save, action_latents), option
 
     def run(self):
         rewards = []

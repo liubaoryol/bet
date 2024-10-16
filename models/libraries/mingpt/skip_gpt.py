@@ -131,24 +131,41 @@ class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         self.option_embedding = torch.nn.Embedding(7, 60)
-        # input embedding stem
+        self.make_goal_model(config)
+        self.make_policy(config)
+        self.apply(self._init_weights)
 
+        logger.info(
+            "number of parameters: %e", sum(p.numel() for p in self.parameters())
+        )
+
+    def make_policy(self, config):
+            # input embedding stem
+        # input is s and s', output is a
         self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
-        self.discrete_input = config.discrete_input
+
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop)
         # transformer
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         # decoder head
         self.ln_f = nn.LayerNorm(config.n_embd)
-        self.head = nn.Linear(config.n_embd, 7, bias=False)
-        # self.act = nn.Softmax(-1)
-        self.block_size = config.block_size
-        self.apply(self._init_weights)
+        self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-        logger.info(
-            "number of parameters: %e", sum(p.numel() for p in self.parameters())
-        )
+        self.block_size = config.block_size
+
+    def make_goal_model(self, config):
+                # input embedding stem
+        # input is s, o, output is s'
+        self.tok_emb_goal = nn.Linear(config.input_size * 2, config.n_embd)
+        self.pos_emb_goal = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
+        self.drop_goal = nn.Dropout(config.embd_pdrop)
+        # transformer
+        self.blocks_goal = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        # decoder head
+        self.ln_f_goal = nn.LayerNorm(config.n_embd)
+        self.head_goal = nn.Linear(config.n_embd, config.input_size, bias=False)
+
 
     def get_block_size(self):
         return self.block_size
@@ -193,6 +210,7 @@ class GPT(nn.Module):
 
         # special case the position embedding parameter in the root GPT module as not decayed
         no_decay.add("pos_emb")
+        no_decay.add("pos_emb_goal")
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -224,16 +242,28 @@ class GPT(nn.Module):
         return optimizer
 
     def forward(self, idx, targets=None):
-
         enc_obs, options = idx
+        # import pdb; pdb.set_trace()
         options = options.to(enc_obs.device)
         emb_opts = self.option_embedding(options)
         opts_states = torch.concatenate((enc_obs, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
 
-        # forward the GPT model
         t = enc_obs.size()[1]
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
-        token_embeddings = self.tok_emb(opts_states)  # each index maps to a (learnable) vector
+
+        token_embeddings_intergoal = self.tok_emb_goal(opts_states) 
+        position_embeddings_itergoal = self.pos_emb_goal[
+            :, :t, :
+        ]  # each position maps to a (learnable) vector
+        x = self.drop(token_embeddings_intergoal + position_embeddings_itergoal)
+        x = self.blocks_goal(x)
+        x = self.ln_f_goal(x)
+        logits_next_state = self.head_goal(x)
+
+
+        prev_next_state = torch.concatenate((enc_obs, logits_next_state ), -1)
+        # forward the GPT model
+        token_embeddings = self.tok_emb(prev_next_state)  # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[
             :, :t, :
         ]  # each position maps to a (learnable) vector
@@ -241,13 +271,10 @@ class GPT(nn.Module):
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.head(x)
-        # logits = self.act(logits)
 
         # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
-            targets = targets.to(enc_obs.device)
-            targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1, logits.size(-1)))
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
         return logits, loss

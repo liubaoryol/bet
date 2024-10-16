@@ -15,9 +15,9 @@ load_dir: ${env.load_dir}
 window_size: 3
 
 # Environment running setup
-num_eval_eps: 100
+num_eval_eps: 20
 action_batch_size: 1
-num_eval_steps: 700
+num_eval_steps: 1400
 use_state_prior: True
 enable_offsets: True
 action_update_every: 1
