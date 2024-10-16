@@ -148,11 +148,16 @@ class Workspace:
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
-                _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                logits, loss, loss_components = self.state_prior.get_latent_and_loss(
                     obs_rep=(enc_obs, option),
                     target_latents=latent,
                     return_loss_components=True,
                 )
+                pred, offsets = logits
+                regularizer = torch.nn.L1Loss()
+                r1 = regularizer(pred[:-1], pred[1:])
+                r2 = regularizer(offsets[:-1], offsets[1:])
+                loss = loss + r1 + r2
                 loss.backward()
                 
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
