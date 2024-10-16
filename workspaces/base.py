@@ -104,7 +104,7 @@ class Workspace:
         latent_history = []
         obs = self.env.reset()
         # initial option distribution has not been trained so will start with 0
-        option = torch.Tensor([[5]]).to(torch.int).to(self.device)
+        option = torch.Tensor([[4]]).to(torch.int).to(self.device)
         last_obs = obs
         if self.cfg.start_from_seen:
             obs = self._start_from_known()
@@ -173,6 +173,7 @@ class Workspace:
                     torch.ones_like(enc_obs_seq).mean(dim=-1),
                     option=option
                 )
+                # print("OPTION: ", option)
                 # For visualization, also get raw logits and offsets
                 # placeholder_target = (
                 #     torch.zeros_like(latents[0]),

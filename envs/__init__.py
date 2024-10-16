@@ -67,7 +67,7 @@ try:
     register(
         id="kitchen-all-v0",
         entry_point="envs.kitchen.v0:KitchenAllV0",
-        max_episode_steps=280,
+        max_episode_steps=2800,
         reward_threshold=1.0,
     )
 

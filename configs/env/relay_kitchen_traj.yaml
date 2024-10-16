@@ -11,8 +11,11 @@ action_max: null
 # BeT with zero option but skip connection
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
 # Hierarchical BeT
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
-
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
+# Hierarchical BeT reorganized for dropout and positional embeddings to be applied to state only
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/140024_kitchen_train"
+# Same as above but higher dropout.
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/140945_kitchen_train"
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
 

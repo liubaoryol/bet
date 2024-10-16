@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class GPTConfig:
     """base GPT config, params common to all GPT versions"""
 
-    embd_pdrop = 0.1
+    embd_pdrop = 0.2
     resid_pdrop = 0.1
     attn_pdrop = 0.1
     discrete_input = False
@@ -145,7 +145,7 @@ class GPT(nn.Module):
         self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
 
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
-        self.drop = nn.Dropout(config.embd_pdrop)
+        self.drop = nn.Dropout(config.embd_pdrop*2)
         # transformer
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         # decoder head
@@ -157,8 +157,8 @@ class GPT(nn.Module):
     def make_goal_model(self, config):
                 # input embedding stem
         # input is s, o, output is s'
-        self.tok_emb_goal = nn.Linear(config.input_size * 2, config.n_embd)
-        self.pos_emb_goal = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
+        self.tok_emb_goal = nn.Linear(config.input_size, config.n_embd//2)
+        self.pos_emb_goal = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd//2))
         self.drop_goal = nn.Dropout(config.embd_pdrop)
         # transformer
         self.blocks_goal = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
@@ -243,19 +243,20 @@ class GPT(nn.Module):
 
     def forward(self, idx, targets=None):
         enc_obs, options = idx
-        # import pdb; pdb.set_trace()
         options = options.to(enc_obs.device)
-        emb_opts = self.option_embedding(options)
-        opts_states = torch.concatenate((enc_obs, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
-
+        
         t = enc_obs.size()[1]
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
 
-        token_embeddings_intergoal = self.tok_emb_goal(opts_states) 
+        token_embeddings_intergoal = self.tok_emb_goal(enc_obs)
         position_embeddings_itergoal = self.pos_emb_goal[
             :, :t, :
         ]  # each position maps to a (learnable) vector
         x = self.drop(token_embeddings_intergoal + position_embeddings_itergoal)
+
+        emb_opts = self.option_embedding(options)
+        x = torch.concatenate((x, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
+
         x = self.blocks_goal(x)
         x = self.ln_f_goal(x)
         logits_next_state = self.head_goal(x)

@@ -133,9 +133,9 @@ class GPT(nn.Module):
         self.option_embedding = torch.nn.Embedding(7, 60)
         # input embedding stem
 
-        self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
+        self.tok_emb = nn.Linear(config.input_size, config.n_embd//2)
         self.discrete_input = config.discrete_input
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd//2))
         self.drop = nn.Dropout(config.embd_pdrop)
         # transformer
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
@@ -224,20 +224,23 @@ class GPT(nn.Module):
         return optimizer
 
     def forward(self, idx, targets=None):
-
+        # import pdb; pdb.set_trace()
         enc_obs, options = idx
         options = options.to(enc_obs.device)
-        emb_opts = self.option_embedding(options)
-        opts_states = torch.concatenate((enc_obs, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
 
         # forward the GPT model
         t = enc_obs.size()[1]
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
-        token_embeddings = self.tok_emb(opts_states)  # each index maps to a (learnable) vector
+        token_embeddings = self.tok_emb(enc_obs)  # each index maps to a (learnable) vector
+        
         position_embeddings = self.pos_emb[
             :, :t, :
         ]  # each position maps to a (learnable) vector
         x = self.drop(token_embeddings + position_embeddings)
+        
+        emb_opts = self.option_embedding(options)
+        x = torch.concatenate((x, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
+
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.head(x)
