@@ -11,8 +11,13 @@ action_max: null
 # BeT with zero option but skip connection
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
 # Hierarchical BeT
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
 
+# Hierarchical BeT with Lipschitz regularization; run from lipschitz branch
+# no weight applied
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/181029_kitchen_train"
+# with weight 0.1 applied
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/182001_kitchen_train"
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
 
