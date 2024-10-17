@@ -6,16 +6,30 @@ action_dim: 9
 action_min: null
 action_max: null
 
-# BeT baseline
+# BeT baseline; run from branch main
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/105443_kitchen_train"
-# BeT with zero option but skip connection
+
+# BeT with zero option but skip connection; don't have a saved place where to run from
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
-# Hierarchical BeT
+
+# Hierarchical BeT; run from branch independence-conditions, commit ac346e9
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/110247_kitchen_train"
+
 # Hierarchical BeT reorganized for dropout and positional embeddings to be applied to state only
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/140024_kitchen_train"
+# run from branch independence-conditions, last commit (4102fc7)
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/140024_kitchen_train"
 # Same as above but higher dropout.
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/140945_kitchen_train"
+
+# Hierarchical BeT with Lipschitz regularization; run from lipschitz branch
+# no weight applied
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/181029_kitchen_train"
+# with weight 0.1 applied
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/182001_kitchen_train"
+
+# Hierarchical BeT with input dropout
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.16/185924_kitchen_train/"
+
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
 

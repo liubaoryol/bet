@@ -142,7 +142,7 @@ class GPT(nn.Module):
     def make_policy(self, config):
             # input embedding stem
         # input is s and s', output is a
-        self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
+        self.tok_emb = nn.Linear(config.input_size*2, config.n_embd, bias=False)
 
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop*2)
@@ -157,7 +157,7 @@ class GPT(nn.Module):
     def make_goal_model(self, config):
                 # input embedding stem
         # input is s, o, output is s'
-        self.tok_emb_goal = nn.Linear(config.input_size, config.n_embd//2)
+        self.tok_emb_goal = nn.Linear(config.input_size, config.n_embd//2, bias=False)
         self.pos_emb_goal = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd//2))
         self.drop_goal = nn.Dropout(config.embd_pdrop)
         # transformer

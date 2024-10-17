@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import tqdm
 from torch.utils.data import DataLoader
+import numpy as np
 
 from models.action_ae.generators.base import GeneratorDataParallel
 from models.latent_generators.latent_generator import LatentGeneratorDataParallel
@@ -144,6 +145,9 @@ class Workspace:
             )
             for data in pbar:
                 observations, action, mask, option = data
+                # import pdb; pdb.set_trace()
+                mask = np.random.choice((0,1), p=[0.1,0.9], size=observations.size())
+                observations = (observations*mask).to(torch.float32)
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
