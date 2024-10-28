@@ -7,14 +7,28 @@ import torch
 import torch.nn.functional as F
 import tqdm
 from torch.utils.data import DataLoader
+from torch import nn
 
 from models.action_ae.generators.base import GeneratorDataParallel
 from models.latent_generators.latent_generator import LatentGeneratorDataParallel
 from omegaconf import OmegaConf
+from dataloaders.trajectory_loader import RelayKitchenTrajectoryDataset
 
 import utils
 import wandb
 
+
+class minorCustomData(RelayKitchenTrajectoryDataset):
+    def __init__(self,  data_directory, device="cpu"):
+        super().__init__(data_directory, device)
+    
+    def __getitem__(self, idx):
+        item = super().__getitem__(idx)
+        return (item[0][0],
+                item[1][0],
+                item[2][0],
+                torch.nn.functional.one_hot(item[3][0].to(torch.long), num_classes = 7)
+        )
 
 class Workspace:
     def __init__(self, cfg):
@@ -30,6 +44,21 @@ class Workspace:
             device=self.device,
         )
         self.train_set, self.test_set = self.dataset
+
+        self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory)
+        self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
+
+        # Simple MLP to sample an initial option.
+        self.init_prob = torch.nn.Sequential(
+            torch.nn.Linear(self.init_data[0][0].size(0), self.init_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.init_data[0][0].size(0)//2, 7),
+        ).to(self.device)
+        self.init_optimizer = torch.optim.Adam(
+            self.init_prob.parameters()
+            )
+        self.init_criterion = torch.nn.CrossEntropyLoss()
+
         self._setup_loaders()
 
         # Create the model
@@ -166,6 +195,20 @@ class Workspace:
                 self.log_append("option_train", len(observations), {'cross_entropy': loss2})
                 self.log_append("prior_train", len(observations), loss_components)
 
+    def train_init_state(self):
+        self.init_prob.train()
+        for epoch in range(150):
+            total = 0
+            for observations, _, _, option in self.init_dataloader:
+                self.init_optimizer.zero_grad()
+                obs, targets = observations.to(self.device), option.to(self.device)
+                logits = self.init_prob(obs)
+                loss = self.init_criterion(logits, targets.to(torch.float))
+                total += loss.item()
+                loss.backward()
+                self.init_optimizer.step()
+            print("Training init distr; epoch ", epoch, "with loss", total)
+
     def eval_prior(self):
         with utils.eval_mode(
             self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
@@ -203,6 +246,8 @@ class Workspace:
         if self.cfg.lazy_init_models:
             self._init_obs_encoding_net()
             self._init_action_ae()
+        
+        self.train_init_state()
         self.action_ae.fit_model(
             self.train_loader,
             self.test_loader,
@@ -265,7 +310,8 @@ class Workspace:
             "obs_encoding_net",
             "epoch",
             "prior_epoch",
-            "state_prior"
+            "state_prior",
+            "init_prob"
         ]
         payload = {k: self.__dict__[k] for k in self._keys_to_save}
         with self.snapshot.open("wb") as f:
