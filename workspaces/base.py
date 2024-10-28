@@ -104,7 +104,10 @@ class Workspace:
         latent_history = []
         obs = self.env.reset()
         # initial option distribution has not been trained so will start with 0
-        option = torch.Tensor([[5]]).to(torch.int).to(self.device)
+        with utils.eval_mode(self.init_prob):
+            option = self.init_prob(torch.Tensor(obs).to('cuda'))
+            option = torch.nn.Softmax()(option)
+        option = torch.multinomial(option, num_samples=1).reshape(1,-1)
         last_obs = obs
         if self.cfg.start_from_seen:
             obs = self._start_from_known()
@@ -242,7 +245,7 @@ class Workspace:
         return Path(self.cfg.load_dir or self.work_dir) / "snapshot.pt"
 
     def load_snapshot(self):
-        keys_to_load = ["action_ae", "obs_encoding_net", "state_prior"]
+        keys_to_load = ["action_ae", "obs_encoding_net", "state_prior", "init_prob"]
         with self.snapshot.open("rb") as f:
             payload = torch.load(f, map_location=self.device)
         loaded_keys = []
