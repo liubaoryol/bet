@@ -50,7 +50,12 @@ ALL_TASKS = [
 
 
 class RelayKitchenTrajectoryDataset(TensorDataset):
-    def __init__(self, data_directory, device="cpu"):
+    def __init__(self,
+                 data_directory,
+                 device="cpu", 
+                 unsupervised=False,
+                 option_model=None):
+        
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -60,7 +65,14 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             observations, actions, masks
         )
         self.masks = masks
-        self.options = self.set_options(observations)
+        if unsupervised:
+            self.options = self.estimate_options(
+                observations,
+                actions,
+                option_model)
+            self.options = self.options.squeeze(-1)
+        else:
+            self.options = self.set_options(observations)
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
@@ -88,6 +100,19 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
                 env.render()
                 if not mask:
                     break
+
+
+    def estimate_options(self, observations, actions, option_model):
+        from dataloaders.fb_algorithm_latent import update_latent
+        true_options = []
+        for obs, acts in zip(observations, actions):
+            opts = update_latent(
+                obs,
+                acts,
+                option_model,
+                option_dim=7)
+            true_options.append(opts)
+        return np.stack(true_options)
 
     def set_options(self, observations):
         true_options = []
@@ -502,9 +527,15 @@ def get_relay_kitchen_train_val(
     random_seed=42,
     device="cpu",
     window_size=10,
+    unsupervised=False,
+    option_model=None
 ):
 
-    relay_kitchen_trajectories = RelayKitchenTrajectoryDataset(data_directory)
+    relay_kitchen_trajectories = RelayKitchenTrajectoryDataset(
+        data_directory,
+        unsupervised=unsupervised,
+        option_model=option_model)
+    
     train_set, val_set = split_datasets(
         relay_kitchen_trajectories,
         train_fraction=train_fraction,

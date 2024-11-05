@@ -23,24 +23,26 @@ class Workspace:
         self.cfg = cfg
         self.device = torch.device(cfg.device)
         utils.set_seed_everywhere(cfg.seed)
-        self.dataset = hydra.utils.call(
-            cfg.env.dataset_fn,
-            train_fraction=cfg.train_fraction,
-            random_seed=cfg.seed,
-            device=self.device,
-        )
-        self.train_set, self.test_set = self.dataset
-        self._setup_loaders()
 
         # Create the model
         self.action_ae = None
         self.obs_encoding_net = None
         self.state_prior = None
-        self.option_model = None
+        # self.option_model = None
         if not self.cfg.lazy_init_models:
             self._init_action_ae()
             self._init_obs_encoding_net()
             self._init_state_prior()
+        self.dataset = hydra.utils.call(
+            cfg.env.dataset_fn,
+            train_fraction=cfg.train_fraction,
+            random_seed=cfg.seed,
+            device=self.device,
+            unsupervised=cfg.unsupervised,
+            option_model=self.state_prior.option_model
+        )
+        self.train_set, self.test_set = self.dataset
+        self._setup_loaders()
 
         self.log_components = OrderedDict()
         self.epoch = self.prior_epoch = self.option_epoch = 0
