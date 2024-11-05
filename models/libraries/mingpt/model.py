@@ -130,9 +130,8 @@ class GPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
         super().__init__()
-        self.option_embedding = torch.nn.Embedding(7, 60)
+        self.option_embedding = torch.nn.Embedding(7, 11)
         # input embedding stem
-
         self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
         self.discrete_input = config.discrete_input
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))

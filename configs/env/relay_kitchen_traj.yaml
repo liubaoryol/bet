@@ -1,7 +1,7 @@
 name: kitchen-all-v0
 args: []
 kw_init_option_modelargs: {}
-obs_dim: 60
+obs_dim: 11
 action_dim: 9
 action_min: null
 action_max: null

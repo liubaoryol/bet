@@ -15,7 +15,7 @@ num_workers: 32
 window_size: 10
 
 # Supervision parameters
-unsupervised: True
+unsupervised: False
 
 # Training details
 num_training_epochs: 1

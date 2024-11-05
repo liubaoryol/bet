@@ -65,14 +65,16 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             observations, actions, masks
         )
         self.masks = masks
+        self.options = self.set_options(observations)
+
+        observations = observations[:,:,:11]
         if unsupervised:
             self.options = self.estimate_options(
                 observations,
                 actions,
                 option_model)
             self.options = self.options.squeeze(-1)
-        else:
-            self.options = self.set_options(observations)
+
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
