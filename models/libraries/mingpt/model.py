@@ -130,7 +130,7 @@ class GPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
         super().__init__()
-        self.option_embedding = torch.nn.Embedding(7, 60)
+        self.option_embedding = torch.nn.Embedding(7, 11)
         # input embedding stem
 
         self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
@@ -247,7 +247,8 @@ class GPT(nn.Module):
         loss = None
         if targets is not None:
             targets = targets.to(enc_obs.device)
-            targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1, logits.size(-1)))
+            targets = targets.to(torch.int64).reshape(-1)
+            # targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets)
 
         return logits, loss

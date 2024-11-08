@@ -61,6 +61,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         )
         self.masks = masks
         self.options = self.set_options(observations)
+        observations = observations[:,:,:11]
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),

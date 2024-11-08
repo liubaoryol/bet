@@ -147,23 +147,6 @@ class Workspace:
             num_workers=self.cfg.num_workers,
             pin_memory=True,
         )
-    def train_option(self):
-        self.state_prior.train()
-        with utils.eval_mode(self.obs_encoding_net, self.action_ae):
-            pbar = tqdm.tqdm(
-                self.train_loader, desc=f"Training option epoch {self.option_epoch}"
-            )
-        for data in pbar:
-                observations, action, mask, option = data
-                self.option_optimizer.zero_grad(set_to_none=True)
-                obs, act = observations.to(self.device), action.to(self.device)
-                enc_obs = self.obs_encoding_net(obs)
-                # import pdb; pdb.set_trace()
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
-                loss2.backward()
-                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
-                torch.nn.utils.clip_grad_norm_(self.state_prior.option_model.parameters(), self.cfg.grad_norm_clip)
-                self.option_optimizer.step()
 
     def train_prior(self):
         self.state_prior.train()
@@ -172,29 +155,33 @@ class Workspace:
                 self.train_loader, desc=f"Training prior epoch {self.prior_epoch}"
             )
             for data in pbar:
-                observations, action, mask, option = data
-                self.state_prior_optimizer.zero_grad(set_to_none=True)
-                obs, act = observations.to(self.device), action.to(self.device)
-                enc_obs = self.obs_encoding_net(obs)
-                latent = self.action_ae.encode_into_latent(act, enc_obs)
-                _, loss, loss_components = self.state_prior.get_latent_and_loss(
-                    obs_rep=(enc_obs, option),
-                    target_latents=latent,
-                    return_loss_components=True,
-                )
-                loss.backward()
+                try:
+                    observations, action, mask, option = data
+                    self.state_prior_optimizer.zero_grad(set_to_none=True)
+                    obs, act = observations.to(self.device), action.to(self.device)
+                    enc_obs = self.obs_encoding_net(obs)
+                    latent = self.action_ae.encode_into_latent(act, enc_obs)
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                    )
+                    loss.backward()
+                    
+                    self.option_optimizer.zero_grad(set_to_none=True)
+                    _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
+                    loss2.backward()
+
+                    torch.nn.utils.clip_grad_norm_(
+                        self.state_prior.parameters(), self.cfg.grad_norm_clip
+                    )
+                    self.state_prior_optimizer.step()
+                    self.option_optimizer.step()
+                    self.log_append("option_train", len(observations), {'cross_entropy': loss2})
+                    self.log_append("prior_train", len(observations), loss_components)
+                except KeyboardInterrupt:
+                    import pdb; pdb.set_trace()
                 
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
-                loss2.backward()
-
-                torch.nn.utils.clip_grad_norm_(
-                    self.state_prior.parameters(), self.cfg.grad_norm_clip
-                )
-                self.state_prior_optimizer.step()
-                self.option_optimizer.step()
-                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
-                self.log_append("prior_train", len(observations), loss_components)
-
     def train_init_state(self):
         self.init_prob.train()
         for epoch in range(150):
@@ -260,18 +247,6 @@ class Workspace:
         if self.cfg.lazy_init_models:
             self._init_state_prior()
         self.log_components = OrderedDict()
-        # Reset the log.
-        # self.option_model_iterator = tqdm.trange(
-        #     self.option_epoch, 50
-        # )
-        # self.option_model_iterator.set_description("Training option model: ")
-        # for epoch in self.option_model_iterator:
-        #     self.option_epoch = epoch
-        #     self.train_option()
-        #     if ((self.option_epoch + 1) % self.cfg.eval_prior_every) == 0:
-        #         self.eval_option()
-        #     self.flush_log(epoch=epoch + self.epoch, iterator=self.option_model_iterator)
-        #     self.option_epoch += 1
 
 
         self.state_prior_iterator = tqdm.trange(

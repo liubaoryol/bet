@@ -99,19 +99,27 @@ class Workspace:
         raise NotImplementedError
 
     def run_single_episode(self):
+        sequence = [5, 6, 0, 1, 2, 3, 4]
         obs_history = []
         action_history = []
         latent_history = []
         obs = self.env.reset()
         # initial option distribution has not been trained so will start with 0
         with utils.eval_mode(self.init_prob):
+            obs = obs[:11]
             option = self.init_prob(torch.Tensor(obs).to('cuda'))
             option = torch.nn.Softmax()(option)
+        
+        print("Initial option distribution: ", option)
         option = torch.multinomial(option, num_samples=1).reshape(1,-1)
+        # o = sequence.pop(0)
+        # option = torch.Tensor([[o]]).to(int).to('cuda')
+        self.curr_option = option
         last_obs = obs
         if self.cfg.start_from_seen:
             obs = self._start_from_known()
         action, latents, option = self._get_action(obs, sample=True, keep_last_bins=False, option=option)
+        # option = torch.Tensor([[o]]).to(int).to('cuda')
         done = False
         total_reward = 0
         obs_history.append(obs)
@@ -126,6 +134,7 @@ class Workspace:
             if self.cfg.enable_render:
                 self.env.render(mode="human")
             obs, reward, done, info = self.env.step(action)
+            obs = obs[:11]
             total_reward += reward
             if obs is None:
                 obs = last_obs  # use cached observation in case of `None` observation
@@ -135,6 +144,15 @@ class Workspace:
             action, latents, option = self._get_action(
                 obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
+            print("Option:", option)
+            # if option != self.curr_option:
+            #     print("Option selected is: ", option)
+            #     if len(sequence)==0:
+            #         break
+            #     o = sequence.pop(0)
+            #     print("Executing task number", o)
+            #     option = torch.Tensor([[o]]).to(int).to('cuda')
+            #     self.curr_option = option
             obs_history.append(obs)
             action_history.append(action)
             latent_history.append(latents)
