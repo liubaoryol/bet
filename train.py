@@ -2,6 +2,7 @@ import logging
 from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 import hydra
 import torch
 import torch.nn.functional as F
@@ -29,6 +30,46 @@ class minorCustomData(RelayKitchenTrajectoryDataset):
                 item[2][0],
                 torch.nn.functional.one_hot(item[3][0].to(torch.long), num_classes = 7)
         )
+
+
+class hierCustomData(RelayKitchenTrajectoryDataset):
+    def __init__(self,  data_directory, device="cpu"):
+        super().__init__(data_directory, device)
+        self._change_mask()
+        self.observations = []
+        self.options = []
+        self.next_options = []
+
+        for idx in range(len(self.masks)):
+            item = super().__getitem__(idx)
+            idxs = self.masks[idx].astype(bool)
+            obs, _, _, opt = item
+            obs = obs[idxs]
+            opt = torch.nn.functional.one_hot(opt[idxs].to(torch.long), num_classes = 7)
+            self.observations.append(obs[:-1])
+            self.options.append(opt[:-1])
+            self.next_options.append(opt[1:])
+
+        self.observations = torch.concat(self.observations)
+        self.options = torch.concat(self.options)
+        self.next_options = torch.concat(self.next_options)
+
+    def __getitem__(self, idx):
+
+        state = self.observations[idx]
+        opt = self.options[idx]
+        next_opt = self.next_options[idx]
+        return torch.concat((state, opt)), next_opt
+    
+    def _change_mask(self):
+        for mask in self.masks:
+            idxs = np.where(mask)[0]
+            mask[idxs[-1]] = 0
+        self.masks[:, :5] = 0  # correct for incorrect options
+
+    def __len__(self):
+        return len(self.observations)
+
 
 class Workspace:
     def __init__(self, cfg):
@@ -61,6 +102,47 @@ class Workspace:
 
         self._setup_loaders()
 
+        self.hier_data = hierCustomData(data_directory=cfg.env.dataset_fn.data_directory)
+        self.hier_dataloader = DataLoader(self.hier_data, batch_size=64, shuffle=True)
+        self.hier_model = torch.nn.Sequential(
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0),
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0)//2,
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0)//2,
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0)//2,
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0)//2,
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.hier_data[0][0].size(0)//2,
+                self.hier_data[0][0].size(0)//2),
+            torch.nn.BatchNorm1d(self.hier_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hier_data[0][0].size(0)//2, 7),
+
+            torch.nn.BatchNorm1d(7),
+        ).to(self.device)
+        self.hier_optimizer = torch.optim.Adam(
+            self.hier_model.parameters()
+            )
+        self.hier_criterion = torch.nn.CrossEntropyLoss()
         # Create the model
         self.action_ae = None
         self.obs_encoding_net = None
@@ -117,11 +199,11 @@ class Workspace:
                 weight_decay=self.cfg.weight_decay,
                 betas=tuple(self.cfg.betas),
             )
-            self.option_optimizer = self.state_prior.get_option_optimizer(
-                learning_rate=self.cfg.lr,
-                weight_decay=self.cfg.weight_decay,
-                betas=tuple(self.cfg.betas),
-            )
+            # self.option_optimizer = self.state_prior.get_option_optimizer(
+            #     learning_rate=self.cfg.lr,
+            #     weight_decay=self.cfg.weight_decay,
+            #     betas=tuple(self.cfg.betas),
+            # )
 
     def _setup_loaders(self):
         self.train_loader = DataLoader(
@@ -168,16 +250,16 @@ class Workspace:
                     )
                     loss.backward()
                     
-                    self.option_optimizer.zero_grad(set_to_none=True)
-                    _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
-                    loss2.backward()
+                    # self.option_optimizer.zero_grad(set_to_none=True)
+                    # _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
+                    # loss2.backward()
 
                     torch.nn.utils.clip_grad_norm_(
                         self.state_prior.parameters(), self.cfg.grad_norm_clip
                     )
                     self.state_prior_optimizer.step()
-                    self.option_optimizer.step()
-                    self.log_append("option_train", len(observations), {'cross_entropy': loss2})
+                    # self.option_optimizer.step()
+                    # self.log_append("option_train", len(observations), {'cross_entropy': loss2})
                     self.log_append("prior_train", len(observations), loss_components)
                 except KeyboardInterrupt:
                     import pdb; pdb.set_trace()
@@ -195,6 +277,20 @@ class Workspace:
                 loss.backward()
                 self.init_optimizer.step()
             print("Training init distr; epoch ", epoch, "with loss", total)
+    
+    def train_hier_model(self):
+        self.hier_model.train()
+        for epoch in range(150):
+            total = 0
+            for observations, option in self.hier_dataloader:
+                self.hier_optimizer.zero_grad()
+                obs, targets = observations.to(self.device), option.to(self.device)
+                logits = self.hier_model(obs)
+                loss = self.hier_criterion(logits, targets.to(torch.float))
+                total += loss.item()
+                loss.backward()
+                self.hier_optimizer.step()
+            print("Training hier distr; epoch ", epoch, "with loss", total)
 
     def eval_prior(self):
         with utils.eval_mode(
@@ -211,18 +307,8 @@ class Workspace:
                 )
                 self.log_append("prior_eval", len(observations), loss_components)
 
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
-                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
-
-    def eval_option(self):
-        with utils.eval_mode(
-            self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
-        ):
-            for observations, action, mask, option in self.test_loader:
-                obs, act = observations.to(self.device), action.to(self.device)
-                enc_obs = self.obs_encoding_net(obs)
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
-                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
+                # _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
+                # self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
 
     def run(self):
         snapshot = self.snapshot
@@ -234,6 +320,7 @@ class Workspace:
             self._init_obs_encoding_net()
             self._init_action_ae()
         
+        self.train_hier_model()
         self.train_init_state()
         self.action_ae.fit_model(
             self.train_loader,
@@ -286,7 +373,8 @@ class Workspace:
             "epoch",
             "prior_epoch",
             "state_prior",
-            "init_prob"
+            "init_prob",
+            "hier_model"
         ]
         payload = {k: self.__dict__[k] for k in self._keys_to_save}
         with self.snapshot.open("wb") as f:

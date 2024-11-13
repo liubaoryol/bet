@@ -5,7 +5,7 @@ import einops
 import models.latent_generators.latent_generator as latent_generator
 
 import models.libraries.mingpt.skip_gpt as mingpt_model
-import models.libraries.mingpt.model as option_model
+# import models.libraries.mingpt.model as option_model
 import models.libraries.mingpt.trainer as mingpt_trainer
 from models.libraries.loss_fn import FocalLoss, soft_cross_entropy
 
@@ -65,14 +65,15 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         )
 
         self.model = mingpt_model.GPT(gpt_config)
-        # self.option_model = nn.Sequential(
+        # self.option_model = option_model.GPT(gpt_config)
+
+        # self.option_model2 = nn.Sequential(
         #     nn.Linear(
         #         gpt_config.input_size + gpt_config.n_embd,
         #         gpt_config.input_size),
         #     nn.GELU(),
         #     nn.Linear(gpt_config.input_size, 7),
         # )
-        self.option_model = option_model.GPT(gpt_config)
         # self.option_model.option_embedding = self.model.option_embedding
 
     def get_latent_and_loss(
@@ -174,11 +175,11 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         else:
             logits = output
         # import pdb; pdb.set_trace()
-        opt_distr, _ = self.option_model((obs_rep[[-1]], option[[-1]]))
-        next_option = F.softmax(opt_distr, dim=2)[:, -1]
+        # opt_distr, _ = self.option_model((obs_rep[[-1]], option[[-1]]))
+        # next_option = F.softmax(opt_distr, dim=2)[:, -1]
         # import pdb; pdb.set_trace()
         # next_option = next_option.argmax(1).unsqueeze(1)
-        next_option = torch.multinomial(next_option, num_samples=1)
+        # next_option = torch.multinomial(next_option, num_samples=1)
         
         # if len(set(next_option.reshape(-1).tolist()))>1:
         #     print("distribution is: ", tmp)
@@ -195,9 +196,9 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 torch.arange(offsets.shape[0]), sampled_data.flatten()
             ].view(batch, seq, self.action_dim)
 
-            return (sampled_data, sampled_offsets), next_option
+            return (sampled_data, sampled_offsets)
         else:
-            return sampled_data, next_option
+            return sampled_data
 
     def get_optimizer(
         self, weight_decay: float, learning_rate: float, betas: Tuple[float, float]
@@ -207,12 +208,12 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         )
         return self.model.configure_optimizers(trainer_cfg)
 
-    def get_option_optimizer(
-            self, weight_decay: float, learning_rate:float, betas:Tuple[float, float]
-    ) -> torch.optim.Optimizer:
+    # def get_option_optimizer(
+    #         self, weight_decay: float, learning_rate:float, betas:Tuple[float, float]
+    # ) -> torch.optim.Optimizer:
         
-        trainer_cfg = mingpt_trainer.TrainerConfig(
-            weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
-        )
-        return self.option_model.configure_optimizers(trainer_cfg)
+    #     trainer_cfg = mingpt_trainer.TrainerConfig(
+    #         weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
+    #     )
+    #     return self.option_model.configure_optimizers(trainer_cfg)
         # return torch.optim.Adam(self.option_model.parameters(), lr=0.001)

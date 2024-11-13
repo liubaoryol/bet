@@ -11,7 +11,7 @@ action_max: null
 # BeT with zero option but skip connection
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
 # Hierarchical BeT
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.11.08/103306_kitchen_train"
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.11.11/181847_kitchen_train"
 
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace

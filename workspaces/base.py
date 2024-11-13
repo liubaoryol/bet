@@ -112,6 +112,8 @@ class Workspace:
         
         print("Initial option distribution: ", option)
         option = torch.multinomial(option, num_samples=1).reshape(1,-1)
+        self.curr_option = option
+        print("Option", option)
         # o = sequence.pop(0)
         # option = torch.Tensor([[o]]).to(int).to('cuda')
         self.curr_option = option
@@ -120,6 +122,7 @@ class Workspace:
             obs = self._start_from_known()
         action, latents, option = self._get_action(obs, sample=True, keep_last_bins=False, option=option)
         # option = torch.Tensor([[o]]).to(int).to('cuda')
+
         done = False
         total_reward = 0
         obs_history.append(obs)
@@ -144,7 +147,10 @@ class Workspace:
             action, latents, option = self._get_action(
                 obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
-            print("Option:", option)
+            if self.curr_option != option:
+                print("New option", option)
+                self.curr_option = option
+            # print("Option:", option)
             # if option != self.curr_option:
             #     print("Option selected is: ", option)
             #     if len(sequence)==0:
@@ -169,7 +175,7 @@ class Workspace:
 
     def _get_action(self, obs, sample=False, keep_last_bins=False, option=None):
         with utils.eval_mode(
-            self.action_ae, self.obs_encoding_net, self.state_prior, no_grad=True
+            self.action_ae, self.obs_encoding_net, self.state_prior, self.hier_model, no_grad=True
         ):
             obs = torch.from_numpy(obs).float().to(self.cfg.device).unsqueeze(0)
             enc_obs = self.obs_encoding_net(obs).squeeze(0)
@@ -189,11 +195,15 @@ class Workspace:
                 except:
                     import pdb; pdb.set_trace()
                 # Sample latents from the prior
-                latents, option = self.state_prior.generate_latents(
+                latents = self.state_prior.generate_latents(
                     enc_obs_seq,
                     torch.ones_like(enc_obs_seq).mean(dim=-1),
                     option=option
                 )
+                state = torch.concat((enc_obs, torch.nn.functional.one_hot(option[:, -1], num_classes = 7)), axis=1)
+                option = self.hier_model(state)
+                option = torch.nn.Softmax(1)(option)
+                option = torch.multinomial(option, num_samples=1).reshape(1,-1)
                 # For visualization, also get raw logits and offsets
                 # placeholder_target = (
                 #     torch.zeros_like(latents[0]),
@@ -263,7 +273,7 @@ class Workspace:
         return Path(self.cfg.load_dir or self.work_dir) / "snapshot.pt"
 
     def load_snapshot(self):
-        keys_to_load = ["action_ae", "obs_encoding_net", "state_prior", "init_prob"]
+        keys_to_load = ["action_ae", "obs_encoding_net", "state_prior", "init_prob", "hier_model"]
         with self.snapshot.open("rb") as f:
             payload = torch.load(f, map_location=self.device)
         loaded_keys = []
