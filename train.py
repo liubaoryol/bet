@@ -44,7 +44,10 @@ class Workspace:
             device=self.device,
         )
         self.train_set, self.test_set = self.dataset
-
+        # for _,_,_,opt in self.train_set:
+        #     if opt.unique().size(0)>1:
+        #         print(opt)
+        # import pdb; pdb.set_trace()
         self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory)
         self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
 

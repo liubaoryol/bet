@@ -226,6 +226,7 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None):
 
         enc_obs, options = idx
+        # enc_obs = enc_obs[:11]
         options = options.to(enc_obs.device)
         emb_opts = self.option_embedding(options)
         opts_states = torch.concatenate((enc_obs, emb_opts ), -1) #uncomment qwhen evaluating .unsqueeze(0)
@@ -247,8 +248,7 @@ class GPT(nn.Module):
         loss = None
         if targets is not None:
             targets = targets.to(enc_obs.device)
-            targets = targets.to(torch.int64).reshape(-1)
-            # targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets)
+            targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1, logits.size(-1)))
 
         return logits, loss

@@ -131,6 +131,9 @@ class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         self.option_embedding = torch.nn.Embedding(7, 11)
+        # from copy import deepcopy
+        # config = deepcopy(config)
+        # config.input_size = 11
         self.make_goal_model(config)
         self.make_policy(config)
         self.apply(self._init_weights)
@@ -243,6 +246,7 @@ class GPT(nn.Module):
 
     def forward(self, idx, targets=None):
         enc_obs, options = idx
+        # enc_obs = enc_obs[:, :, :11]
         # import pdb; pdb.set_trace()
         options = options.to(enc_obs.device)
         emb_opts = self.option_embedding(options)

@@ -112,8 +112,10 @@ class Workspace:
         
         print("Initial option distribution: ", option)
         option = torch.multinomial(option, num_samples=1).reshape(1,-1)
+        self.curr_option = option
         # o = sequence.pop(0)
         # option = torch.Tensor([[o]]).to(int).to('cuda')
+        option = torch.Tensor([[5]]).to(int).to('cuda')
         self.curr_option = option
         last_obs = obs
         if self.cfg.start_from_seen:
@@ -144,7 +146,10 @@ class Workspace:
             action, latents, option = self._get_action(
                 obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
-            print("Option:", option)
+            if self.curr_option != option:
+                print("New option", option)
+                self.curr_option = option
+            # print("Option:", option)
             # if option != self.curr_option:
             #     print("Option selected is: ", option)
             #     if len(sequence)==0:

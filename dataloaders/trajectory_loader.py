@@ -49,6 +49,51 @@ ALL_TASKS = [
 ]
 
 
+def get_option_sequence(options, masks):
+    seq = []
+    counter = 0
+    option = -1
+    for o, m in zip(options, masks):
+        if not m:
+            break
+        if o == option:
+            counter +=1
+        elif counter > 5:
+            seq.append(option)
+            counter = 0
+        else:
+            option = o
+    return seq
+retain = [(5,6), (6,0), (0,1), (1,2), (2,3),(3,4)]
+def change_masks(options, masks):
+    counter = 0
+    prev_option = -1
+    for idx, (o, m) in enumerate(zip(options, masks)):
+        if not m:
+            break
+        if o == prev_option:
+            counter +=1
+        elif counter > 5:
+            if prev_option==-1 and o==5:
+                masks[idx-counter:idx+1] = True
+            elif (prev_option, o) in retain:
+                masks[idx-counter:idx+1] = True
+            else:
+                masks[idx-counter:idx+1] = False
+            counter = 0
+            prev_option = o
+        else:
+            prev_option = o
+    return masks
+# data_directory = '/home/liubove/Documents/my-packages/bet/bet_data_release/kitchen/'
+# dataset = RelayKitchenTrajectoryDataset(data_directory)
+# options = dataset.options
+# masks = dataset.masks
+# sequences = [get_option_sequence(opts, mask) for opts, mask in zip(options, masks)]
+# sequences = [tuple(s) for s in sequences]
+# retain = [(5,6,0,1), (6,0,1,2), (0,1,2,3), (1,2,3,4)]
+# mask_out_sequences = [subseq in retain for subseq in sequences]
+# retain = [(5, 6), ]
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self, data_directory, device="cpu"):
         data_directory = Path(data_directory)
@@ -59,8 +104,9 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         observations, actions, masks = transpose_batch_timestep(
             observations, actions, masks
         )
-        self.masks = masks
         self.options = self.set_options(observations)
+        self.masks = masks
+        # self.masks = np.array([change_masks(o, m) for (o, m) in zip(self.options, masks)])
         observations = observations[:,:,:11]
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
@@ -422,6 +468,24 @@ class TrajectorySlicerDataset(Dataset):
 
 
 class TrajectorySlicerSubset(TrajectorySlicerDataset):
+    def __init__(self, dataset: Dataset, window, transform=None):
+        super().__init__(dataset, window, transform)
+        def conditional(options):
+            opts, order = options.unique(return_inverse=True)
+            opts = opts.numpy()
+            if opts.size==1:
+                return True
+            elif opts.size==2:
+                if (opts[order[0]], opts[order[-1]]) in retain:
+                    return True
+                else:
+                    return False
+            else:
+                print("There are three elements")
+                return None
+        self.indices = [i for i in range(len(self)) if conditional(
+            super(TrajectorySlicerSubset, self).__getitem__(i)[-1])]
+
     def _get_seq_length(self, idx: int) -> int:
         # self.dataset is a torch.dataset.Subset, so we need to use the parent dataset
         # to extract the true seq length.
@@ -431,6 +495,38 @@ class TrajectorySlicerSubset(TrajectorySlicerDataset):
     def _get_all_actions(self) -> torch.Tensor:
         return self.dataset.dataset.get_all_actions()
 
+    def __getitem__(self, idx):
+        idx = idx%len(self.indices)
+        return super(TrajectorySlicerSubset, self).__getitem__(self.indices[idx])
+
+    # def __len__(self):
+    #     return len(self.indices)
+
+class FilterTrajectorySlicerSubset(TrajectorySlicerSubset):
+    def __init__(self, dataset: Dataset, window, transform=None):
+        super().__init__(dataset, window, transform)
+        def conditional(options):
+            opts, order = options.unique(return_inverse=True)
+            opts = opts.numpy()
+            if opts.size==1:
+                return True
+            elif opts.size==2:
+                if (opts[order[0]], opts[order[-1]]) in retain:
+                    return True
+                else:
+                    return False
+            else:
+                print("There are three elements")
+                import pdb; pdb.set_trace()
+                return None
+        import pdb; pdb.set_trace()
+        self.indices = [i for i in range(len(self)) if conditional(super(TrajectorySlicerDataset).__getitem__(i)[-1])]
+
+    # def __getitem__(self, idx):
+        # return super(TrajectorySlicerDataset).__getitem__(self.indices[idx])
+    
+    # def __len__(self):
+    #     return len(self.indices)
 
 class TrajectoryRepDataset(Dataset):
     def __init__(

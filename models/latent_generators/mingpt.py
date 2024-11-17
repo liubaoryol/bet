@@ -65,13 +65,6 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         )
 
         self.model = mingpt_model.GPT(gpt_config)
-        # self.option_model = nn.Sequential(
-        #     nn.Linear(
-        #         gpt_config.input_size + gpt_config.n_embd,
-        #         gpt_config.input_size),
-        #     nn.GELU(),
-        #     nn.Linear(gpt_config.input_size, 7),
-        # )
         self.option_model = option_model.GPT(gpt_config)
         # self.option_model.option_embedding = self.model.option_embedding
 
@@ -173,16 +166,8 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             )
         else:
             logits = output
-        # import pdb; pdb.set_trace()
-        opt_distr, _ = self.option_model((obs_rep[[-1]], option[[-1]]))
-        next_option = F.softmax(opt_distr, dim=2)[:, -1]
-        # import pdb; pdb.set_trace()
-        # next_option = next_option.argmax(1).unsqueeze(1)
-        next_option = torch.multinomial(next_option, num_samples=1)
-        
-        # if len(set(next_option.reshape(-1).tolist()))>1:
-        #     print("distribution is: ", tmp)
-
+        next_option = F.softmax(self.option_model((obs_rep, option))[0], -1)
+        next_option = torch.multinomial(next_option.view(-1, next_option.shape[-1]), num_samples=1)
         probs = F.softmax(logits, dim=-1)
         batch, seq, choices = probs.shape
         # Sample from the multinomial distribution, one per row.
@@ -195,9 +180,9 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 torch.arange(offsets.shape[0]), sampled_data.flatten()
             ].view(batch, seq, self.action_dim)
 
-            return (sampled_data, sampled_offsets), next_option
+            return (sampled_data, sampled_offsets), next_option[-1].unsqueeze(0)
         else:
-            return sampled_data, next_option
+            return sampled_data, next_option[-1].unsqueeze(0)
 
     def get_optimizer(
         self, weight_decay: float, learning_rate: float, betas: Tuple[float, float]
@@ -215,4 +200,4 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
         )
         return self.option_model.configure_optimizers(trainer_cfg)
-        # return torch.optim.Adam(self.option_model.parameters(), lr=0.001)
+        
