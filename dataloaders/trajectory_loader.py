@@ -3,6 +3,7 @@ import einops
 import os
 import torch
 import torch.nn as nn
+from copy import deepcopy as copy
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, Dataset
 from pathlib import Path
@@ -53,9 +54,8 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
                  data_directory,
                  device="cpu", 
-                 unsupervised=False,
+                 unsupervised=True,
                  option_model=None):
-        
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -65,15 +65,30 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             observations, actions, masks
         )
         self.masks = masks
-        self.options = self.set_options(observations)
 
+        # I will have three variables for holding options
+        # Real options hold the ground truth options. These will be used for reference, 
+        # or for when querying for the option, to have access to it. This is used only
+        # inside current class
+        # 
+        # options hold estimated options, to be used outside of this class during training
+        # options will be estimated for each time step using option model and skip model
+
+        # available_opts
+        self._gt_options = self._set_gt_options(observations)
+        self._available_gt_options = np.ones(self._gt_options.shape)  # placeholder
         observations = observations[:,:,:11]
+
         if unsupervised:
+            self._available_gt_options[:] = None
             self.options = self.estimate_options(
-                observations,
-                actions,
-                option_model)
-            self.options = self.options.squeeze(-1)
+                observations=observations,
+                actions=actions,
+                estimated_options=self._available_gt_options,
+                option_model=option_model)
+        else:
+            self.options = copy(self._gt_options)
+            self._available_gt_options = copy(self._gt_options)
 
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
@@ -84,39 +99,37 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         # self.visualize()
         self.actions = self.tensors[1]
 
-    def visualize(self):
-        import gym 
-        env = gym.make('kitchen-all-v0')
-        import time
-        env.reset()
-        env.render()
+    def update_options(self, option_model) -> None:
+        observations, actions, masks, options = self.tensors
+        new_options = self.estimate_options(
+            observations=np.array(observations),
+            actions=actions,
+            estimated_options=self.is_option_estimated,
+            option_model=option_model)
+        new_options = torch.from_numpy(new_options).to(observations.device).int()
+        self.options = new_options
+        self.tensors = (observations, actions, masks, new_options)
 
-        for obs, acts, masks, opts in self:
-            print("NEW TRAJECTORY")
-            env.reset()
-            env.render()
-            for act, opt,mask in zip(acts, opts, masks):
-                time.sleep(0.3)
-                print("Option", ALL_TASKS[opt.item()])
-                env.step(act.numpy())
-                env.render()
-                if not mask:
-                    break
-
-
-    def estimate_options(self, observations, actions, option_model):
+    def estimate_options(
+            self,
+            observations,
+            actions,
+            estimated_options,
+            option_model
+            ) -> np.ndarray:
         from dataloaders.fb_algorithm_latent import update_latent
         true_options = []
-        for obs, acts in zip(observations, actions):
+        for obs, acts, is_estmtd in zip(observations, actions, estimated_options):
             opts = update_latent(
-                obs,
-                acts,
-                option_model,
+                states=obs,
+                actions=acts,
+                is_estmtd=is_estmtd,
+                option_model=option_model,
                 option_dim=7)
             true_options.append(opts)
-        return np.stack(true_options)
+        return np.stack(true_options).squeeze(-1)
 
-    def set_options(self, observations):
+    def _set_gt_options(self, observations):
         true_options = []
         for episode in observations:
             args = []

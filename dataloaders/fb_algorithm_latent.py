@@ -46,7 +46,7 @@ def log_prob_option(states, option_model, option_dim=7):
         results.append(logits.squeeze(1))
     return torch.stack(results, axis=1)
 
-def update_latent(states, actions, option_model, option_dim=7):
+def update_latent(states, actions, is_estmtd, option_model, option_dim=7):
     """Apply Viterbi algorithm"""
     
     with torch.no_grad():
@@ -67,14 +67,17 @@ def update_latent(states, actions, option_model, option_dim=7):
         
         accumulate_logp = torch.zeros(option_dim, device=log_prob.device) 
         for i in range(N):
-            # if self._is_latent_estimated[i]:
-            #     accumulate_logp, max_path[i, :] = accumulate_logp + torch.zeros([self.option_dim]), self._latent[i] * torch.ones([self.option_dim])
-            # else:
-            accumulate_logp, max_path[i, :] = (accumulate_logp.unsqueeze(dim=-1) + log_prob[i]).max(dim=-2)
+            if is_estmtd[i]>=0:
+                accumulate_logp, max_path[i, :] = (
+                    accumulate_logp + torch.zeros([option_dim], device=log_prob.device),
+                    is_estmtd[i] * torch.ones([option_dim], device=log_prob.device)
+                )
+            else:
+                accumulate_logp, max_path[i, :] = (accumulate_logp.unsqueeze(dim=-1) + log_prob[i]).max(dim=-2)
         # backward
         c_array = -torch.ones(N+1, 1, dtype=torch.long, device=log_prob.device)
         log_prob_traj, idx = accumulate_logp.max(dim=-1)
         c_array[-1] = max_path[-1][idx]
-        for i in range(N, 1, -1):
+        for i in range(N, 0, -1):
             c_array[i-1] = max_path[i-1][c_array[i]]
-    return c_array[1:].detach().cpu().numpy()
+    return c_array[:-1].detach().cpu().numpy()

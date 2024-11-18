@@ -20,7 +20,7 @@ import wandb
 
 class minorCustomData(RelayKitchenTrajectoryDataset):
     def __init__(self,  data_directory, device="cpu"):
-        super().__init__(data_directory, device)
+        super().__init__(data_directory, device, unsupervised=False)
     
     def __getitem__(self, idx):
         item = super().__getitem__(idx)
