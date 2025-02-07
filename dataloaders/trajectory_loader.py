@@ -19,6 +19,7 @@ from typing import Union, Callable, Optional
 from tqdm import tqdm
 import envs
 import gym
+from students.base import Oracle
 
 OBS_ELEMENT_INDICES = {
     "bottom burner": np.array([11, 12]),
@@ -53,9 +54,7 @@ ALL_TASKS = [
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
                  data_directory,
-                 device="cpu", 
-                 unsupervised=True,
-                 option_model=None):
+                 device="cpu"):
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -75,21 +74,11 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         # options will be estimated for each time step using option model and skip model
 
         # available_opts
-        self._gt_options = self._set_gt_options(observations)
-        self._available_gt_options = np.ones(self._gt_options.shape)  # placeholder
-        observations = observations[:,:,:11]
-
-        if unsupervised:
-            self._available_gt_options[:] = None
-            self.options = self.estimate_options(
-                observations=observations,
-                actions=actions,
-                estimated_options=self._available_gt_options,
-                option_model=option_model)
-        else:
-            self.options = copy(self._gt_options)
-            self._available_gt_options = copy(self._gt_options)
-
+        gt_options = self._calculate_gt_options(observations)
+        self.oracle = Oracle(true_options=gt_options)
+        # observations = observations[:,:,:11]
+        # TODO: Find self._gt_options and self._available_gt_options -> student.annotated_opts
+        self.options = np.zeros_like(masks)
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
@@ -99,37 +88,39 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         # self.visualize()
         self.actions = self.tensors[1]
 
-    def update_options(self, option_model) -> None:
+    def query_oracle(self, student):
+        student.query_oracle(self.oracle)
+        
+    def update_options(self, student, pdb=False):
         observations, actions, masks, options = self.tensors
-        new_options = self.estimate_options(
+        self.options = self.estimate_options(
             observations=np.array(observations),
             actions=actions,
-            estimated_options=self.is_option_estimated,
-            option_model=option_model)
-        new_options = torch.from_numpy(new_options).to(observations.device).int()
-        self.options = new_options
-        self.tensors = (observations, actions, masks, new_options)
+            student=student,
+            pdb=pdb)
+        self.options = torch.from_numpy(self.options).to(observations.device).int()
+        self.tensors = (observations, actions, masks, self.options)
 
     def estimate_options(
             self,
             observations,
             actions,
-            estimated_options,
-            option_model
+            student, pdb=False
             ) -> np.ndarray:
-        from dataloaders.fb_algorithm_latent import update_latent
+        from dataloaders.fb_algorithm_latent import update_latent_viterbi
         true_options = []
-        for obs, acts, is_estmtd in zip(observations, actions, estimated_options):
-            opts = update_latent(
+        for traj_num, (obs, acts) in enumerate(zip(observations, actions)):
+            print("Traj num", traj_num)
+            opts = update_latent_viterbi(
                 states=obs,
                 actions=acts,
-                is_estmtd=is_estmtd,
-                option_model=option_model,
-                option_dim=7)
+                traj_num=traj_num,
+                student=student,
+                option_dim=7, pdb=pdb)
             true_options.append(opts)
         return np.stack(true_options).squeeze(-1)
 
-    def _set_gt_options(self, observations):
+    def _calculate_gt_options(self, observations):
         true_options = []
         for episode in observations:
             args = []
@@ -541,15 +532,11 @@ def get_relay_kitchen_train_val(
     train_fraction=0.9,
     random_seed=42,
     device="cpu",
-    window_size=10,
-    unsupervised=False,
-    option_model=None
+    window_size=10
 ):
 
     relay_kitchen_trajectories = RelayKitchenTrajectoryDataset(
-        data_directory,
-        unsupervised=unsupervised,
-        option_model=option_model)
+        data_directory)
     
     train_set, val_set = split_datasets(
         relay_kitchen_trajectories,

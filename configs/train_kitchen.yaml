@@ -15,7 +15,7 @@ num_workers: 32
 window_size: 10
 
 # Supervision parameters
-unsupervised: False
+student_type: supervised # unsupervised, IterativeRandom, QueryCapLimit, Random
 
 # Training details
 num_training_epochs: 1

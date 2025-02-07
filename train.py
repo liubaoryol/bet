@@ -13,14 +13,15 @@ from models.action_ae.generators.base import GeneratorDataParallel
 from models.latent_generators.latent_generator import LatentGeneratorDataParallel
 from omegaconf import OmegaConf
 from dataloaders.trajectory_loader import RelayKitchenTrajectoryDataset
-
+from students.base import Oracle
+from students import random_student #IterativeRandom, Supervised, Unsupervised, QueryCapLimit, Random
 import utils
 import wandb
 
 
 class minorCustomData(RelayKitchenTrajectoryDataset):
     def __init__(self,  data_directory, device="cpu"):
-        super().__init__(data_directory, device, unsupervised=False)
+        super().__init__(data_directory, device)
     
     def __getitem__(self, idx):
         item = super().__getitem__(idx)
@@ -37,13 +38,13 @@ class Workspace:
         self.cfg = cfg
         self.device = torch.device(cfg.device)
         utils.set_seed_everywhere(cfg.seed)
-        self.dataset = hydra.utils.call(
-            cfg.env.dataset_fn,
-            train_fraction=cfg.train_fraction,
-            random_seed=cfg.seed,
-            device=self.device,
-        )
-        self.train_set, self.test_set = self.dataset
+        # self.dataset = hydra.utils.call(
+        #     cfg.env.dataset_fn,
+        #     train_fraction=cfg.train_fraction,
+        #     random_seed=cfg.seed,
+        #     device=self.device,
+        # )
+        # self.train_set, self.test_set = self.dataset
 
         self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory)
         self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
@@ -59,7 +60,7 @@ class Workspace:
             )
         self.init_criterion = torch.nn.CrossEntropyLoss()
 
-        self._setup_loaders()
+        # self._setup_loaders()
 
         # Create the model
         self.action_ae = None
@@ -74,12 +75,18 @@ class Workspace:
             cfg.env.dataset_fn,
             train_fraction=cfg.train_fraction,
             random_seed=cfg.seed,
-            device=self.device,
-            unsupervised=cfg.unsupervised,
-            option_model=self.state_prior.option_model
+            device=self.device
         )
         self.train_set, self.test_set = self.dataset
         self._setup_loaders()
+        self.student = getattr(random_student, cfg.student_type.capitalize())(
+            option_dim=7,
+            state_prior=self.state_prior,
+            action_ae=self.action_ae)
+        # self.student2 = Unsupervised(option_dim=7)
+        # self.student3 = IterativeRandom(option_dim=7)
+        # self.student4 = QueryCapLimit(option_dim=7, query_demo_cap=30)
+        # self.student5 = Random(option_dim=7, query_percent=0.1)
 
         self.log_components = OrderedDict()
         self.epoch = self.prior_epoch = self.option_epoch = 0
@@ -157,23 +164,23 @@ class Workspace:
             num_workers=self.cfg.num_workers,
             pin_memory=True,
         )
-    def train_option(self):
-        self.state_prior.train()
-        with utils.eval_mode(self.obs_encoding_net, self.action_ae):
-            pbar = tqdm.tqdm(
-                self.train_loader, desc=f"Training option epoch {self.option_epoch}"
-            )
-        for data in pbar:
-                observations, action, mask, option = data
-                self.option_optimizer.zero_grad(set_to_none=True)
-                obs, act = observations.to(self.device), action.to(self.device)
-                enc_obs = self.obs_encoding_net(obs)
-                # import pdb; pdb.set_trace()
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
-                loss2.backward()
-                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
-                torch.nn.utils.clip_grad_norm_(self.state_prior.option_model.parameters(), self.cfg.grad_norm_clip)
-                self.option_optimizer.step()
+    # def train_option(self):
+    #     self.state_prior.train()
+    #     with utils.eval_mode(self.obs_encoding_net, self.action_ae):
+    #         pbar = tqdm.tqdm(
+    #             self.train_loader, desc=f"Training option epoch {self.option_epoch}"
+    #         )
+    #     for data in pbar:
+    #             observations, action, mask, option = data
+    #             self.option_optimizer.zero_grad(set_to_none=True)
+    #             obs, act = observations.to(self.device), action.to(self.device)
+    #             enc_obs = self.obs_encoding_net(obs)
+    #             # import pdb; pdb.set_trace()
+    #             _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
+    #             loss2.backward()
+    #             self.log_append("option_train", len(observations), {'cross_entropy': loss2})
+    #             torch.nn.utils.clip_grad_norm_(self.state_prior.option_model.parameters(), self.cfg.grad_norm_clip)
+    #             self.option_optimizer.step()
 
     def train_prior(self):
         self.state_prior.train()
@@ -207,7 +214,7 @@ class Workspace:
 
     def train_init_state(self):
         self.init_prob.train()
-        for epoch in range(150):
+        for epoch in range(50):
             total = 0
             for observations, _, _, option in self.init_dataloader:
                 self.init_optimizer.zero_grad()
@@ -282,8 +289,15 @@ class Workspace:
         #         self.eval_option()
         #     self.flush_log(epoch=epoch + self.epoch, iterator=self.option_model_iterator)
         #     self.option_epoch += 1
-
-
+        if self.student.single_query_only:
+            print("Querying oracle!")
+            self.train_set.dataset.dataset.query_oracle(self.student)
+            import time
+            now = time.perf_counter()
+            self.train_set.dataset.dataset.update_options(
+                self.student)
+            transcurrido = time.perf_counter()-now
+            print("Elapsed time", transcurrido)
         self.state_prior_iterator = tqdm.trange(
             self.prior_epoch, self.cfg.num_prior_epochs
         )
@@ -299,6 +313,9 @@ class Workspace:
             if ((self.prior_epoch + 1) % self.cfg.save_prior_every) == 0:
                 self.save_snapshot()
 
+        # self.train_set.dataset.dataset.update_options(
+        #     self.student,
+        #     pdb=True)
         # expose DataParallel module class name for wandb tags
         tag_func = (
             lambda m: m.module.__class__.__name__
