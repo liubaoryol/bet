@@ -130,7 +130,7 @@ class GPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
         super().__init__()
-        self.option_embedding = torch.nn.Embedding(7, 11)
+        self.option_embedding = torch.nn.Embedding(7, 60)
         self.make_goal_model(config)
         self.make_policy(config)
         self.apply(self._init_weights)

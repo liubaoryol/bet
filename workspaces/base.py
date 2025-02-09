@@ -35,6 +35,7 @@ class Workspace:
         self.action_ae = None
         self.obs_encoding_net = None
         self.state_prior = None
+        self.init_prob = None
         if not self.cfg.lazy_init_models:
             self._init_action_ae()
             self._init_obs_encoding_net()
@@ -103,6 +104,8 @@ class Workspace:
         action_history = []
         latent_history = []
         obs = self.env.reset()
+        # obs = obs[:11]
+        # import pdb; pdb.set_trace()
         # initial option distribution has not been trained so will start with 0
         with utils.eval_mode(self.init_prob):
             option = self.init_prob(torch.Tensor(obs).to('cuda'))
@@ -126,6 +129,7 @@ class Workspace:
             if self.cfg.enable_render:
                 self.env.render(mode="human")
             obs, reward, done, info = self.env.step(action)
+            # obs = obs[:11]
             total_reward += reward
             if obs is None:
                 obs = last_obs  # use cached observation in case of `None` observation

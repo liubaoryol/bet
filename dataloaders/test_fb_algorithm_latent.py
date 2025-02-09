@@ -18,6 +18,7 @@ import numpy as np
 from dataloaders.fb_algorithm_latent import log_prob_option
 from dataloaders.fb_algorithm_latent import (approx_time_transition,
                                              approx_xsat_given_xsaprev_xj,
+                                             xsat_given_xsaprev_xj,
                                              update_latent_viterbi)
 from dataloaders.test_config import cfg
 import workspaces.adept_kitchen
@@ -34,6 +35,9 @@ train_set, _ = get_relay_kitchen_train_val(
 )
 dataset = train_set.dataset.dataset
 observations, actions, masks, _ = dataset.tensors
+observations = observations.to(cfg.device)
+actions = actions.to(cfg.device)
+
 true_options=dataset.oracle.true_options
 
 
@@ -58,20 +62,34 @@ def test_partial_supervision():
         dataset.query_oracle(students[name])
 
     traj_num = 0
-    options_dict = {}
-    incorrect = {}
-    for student in students.values():
-        print("Calculating options for student type ", student.student_type)
-        options = update_latent_viterbi(
-            np.array(observations[traj_num]),
-            actions[traj_num], traj_num, student)
-        options = options.squeeze(1)
-        options_dict[student.student_type] = options
+    for traj_num in range(1, len(dataset)):
+        options_dict = {}
+        incorrect = {}
+        states = observations[traj_num][masks[traj_num].to(bool)]
+        acts = actions[traj_num][masks[traj_num].to(bool)]
+        for student in students.values():
+            print("Calculating options for student type ", student.student_type)
+            options = update_latent_viterbi(
+                np.array(states.detach().cpu()),
+                acts, traj_num, student)
+            options = options.squeeze(1)
+            options_dict[student.student_type] = options
 
-        correct_pred = (true_options[traj_num]==options)[masks[traj_num].to(bool)]
-        incorrect_estimations = masks[traj_num].sum() - correct_pred.sum()
-        incorrect[student.student_type] = incorrect_estimations
-
+            correct_pred = (true_options[traj_num][masks[traj_num].to(bool)]==options)
+            incorrect_estimations = masks[traj_num].sum() - correct_pred.sum()
+            incorrect[student.student_type] = incorrect_estimations
+        
+        assert incorrect['query_percent0']<incorrect['unsupervised']
+        # uns_options = options_dict['unsupervised']
+        # semi_sup = options_dict['query_percent0']
+        # uns_incorrect = np.where(uns_options!= true_options[traj_num][masks[traj_num].to(bool)])[0]
+        # semisup_incorrect = np.where(semi_sup!= true_options[traj_num][masks[traj_num].to(bool)])[0]
+        # hope = set(uns_incorrect) - not_queried
+        # for idx in hope:
+        #     print(semi_sup[idx] == true_options[traj_num][[idx]])
+        # queries = students['Random'].list_queries[traj_num]
+        # not_queried = set(range(int(masks[traj_num].sum())))-queries
+        
 
 def test_unsupervised():
     uns_student = random_student.Unsupervised(option_dim=7, state_prior=model.state_prior, action_ae=model.action_ae)
@@ -117,26 +135,35 @@ def test_approx_xsat_given_xsaprev_xj():
     option_dim = 7
     traj_num = 0
     states = observations[traj_num]
-    states = states.unsqueeze(1).to('cuda')
-    j_far = 100
-    j_close = 2
-    t = 0
+    states = states.unsqueeze(1)
+    j_far = 30
+    j_close = 4
+    t = 2
+    acts = actions[traj_num]
+    acts = model.action_ae.encode_into_latent(acts)[0]
+    acts = acts.squeeze(1)
     # a further query will not give a lot of information of the current latent state
     # Hence it will have a lower probability on the true value
-    lower_acc= approx_xsat_given_xsaprev_xj(
-        j_far, t, states, 
-        model.state_prior.option_model, 
+    lower_acc= xsat_given_xsaprev_xj(
+        j_far, t, states, acts, model,
         true_options[traj_num][j_far]
         )
-    higher_acc = approx_xsat_given_xsaprev_xj(
-        j_close, t, states, 
-        model.state_prior.option_model, 
+    higher_acc = xsat_given_xsaprev_xj(
+        j_close, t, states, acts, model,
         true_options[traj_num][j_close]
         )
     for o in range(option_dim):
-        assert lower_acc[o][true_options[traj_num][j_close]]  < higher_acc[o][true_options[traj_num][j_close]]
-    
+        print(o)
+        print(lower_acc[o][true_options[traj_num][j_close]]  < higher_acc[o][true_options[traj_num][j_close]])
+    from dataloaders.fb_algorithm_latent import log_prob_action
+    log_opts = log_prob_option(states[None, t], model.state_prior.option_model)[0] #TODO: t or t+1?
 
+    log_acts = log_prob_action(states[None, t],
+                               acts[t],
+                               option_dim=7,
+                               policy=model.state_prior.model
+                               )
+    transition_matrix = log_opts * log_acts
 def _entropy(tensor1d):
     return -(tensor1d * torch.log(tensor1d)).sum()
 
