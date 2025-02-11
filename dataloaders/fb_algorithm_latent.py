@@ -198,3 +198,150 @@ def xsat_given_xsaprev_xj(j, t, states, actions, model, j_value):
 
     return (res.T / xj_given_xt).T
 
+### Single step message ###
+def clean_forward_msg(
+        states,
+        actions,
+        traj_num,
+        student,
+        option_dim=7):
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    actions = student.action_ae.encode_into_latent(actions.to(device))[0]
+    actions = actions.squeeze(1)
+    states = torch.from_numpy(states.astype('float32'))
+    states = states.unsqueeze(1).to(device)
+    N = len(states)
+    known_latents = student.list_queries.get(traj_num, set()) - set(range(N, 410))
+    known_idxs = np.array(list(known_latents))
+    forward_array = [np.ones(option_dim)/option_dim,] # TODO: use maybe init_state_probability model instead of uniform initialization
+    for idx, st in enumerate(states):
+        st = st[None]
+        l, h = get_relevant_idxs(known_idxs, idx)
+
+        if h is None:
+            log_acts = log_prob_action(st,
+                                       actions[idx],
+                                       option_dim=option_dim,
+                                       policy=student.state_prior.model
+                                       )  # demo_len x 1 x ct
+            log_opts = log_prob_option(st,
+                                       student.state_prior.option_model,
+                                       option_dim)
+            log_acts = log_acts.reshape([-1, 1, option_dim])
+            transition = log_opts * log_acts
+            # transition = torch.log(log_prob)
+        else:
+            transition = xsat_given_xsaprev_xj(
+                h, idx, states, actions, student,  j_value=[student.annotated_options[traj_num][h]]
+                )
+            # transition = torch.log(transition)
+        transition = transition.detach().cpu().numpy()
+        # Cases
+        if l==idx:
+            res = np.zeros(option_dim)
+            res[int(student.annotated_options[traj_num][l])] = 1
+        elif l==idx-1:
+            res = transition[int(student.annotated_options[traj_num][l])]
+        else:
+            res = forward_array[-1] @ transition
+        res = res/sum(res)
+        forward_array.append(res)
+    return np.array(forward_array)
+
+def get_relevant_idxs(known_idxs, idx):
+    lower = known_idxs[known_idxs <=idx]
+    higher = known_idxs[known_idxs>idx]
+    l = max(lower, default=None)
+    h = min(higher, default=None)
+    return l, h
+
+
+
+# TODO: Unit tests
+def backward_clean_msg(
+        states,
+        actions,
+        traj_num,
+        student,
+        option_dim=7):
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    actions = student.action_ae.encode_into_latent(actions.to(device))[0]
+    actions = actions.squeeze(1)
+    states = torch.from_numpy(states.astype('float32'))
+    states = states.unsqueeze(1).to(device)
+    N = len(states)
+    known_latents = student.list_queries.get(traj_num, set()) - set(range(N, 410))
+    known_idxs = np.array(list(known_latents))
+
+
+    backward_array = [np.ones(option_dim)] # <- N-1
+    for i, st in enumerate(reversed(states)):
+        st = st[None]
+        idx = N-i-1
+        h = min(known_idxs[known_idxs >=idx-1], default=None)
+        # Find P(e_{idx:N-1}|X_{idx-1})
+        value_h = int(student.annotated_options[traj_num][h])
+        if idx in known_idxs:
+            value_idx = int(student.annotated_options[traj_num][idx])
+            log_acts = log_prob_action(st,
+                                        actions[idx],
+                                        option_dim=option_dim,
+                                        policy=student.state_prior.model
+                                        )[0][value_idx]
+            res = np.zeros(option_dim)
+            res[:] = log_acts.detach().cpu().numpy() * backward_array[0][value_idx]
+
+        else:
+            if h is None or h==idx-1:
+                log_acts = log_prob_action(st,
+                                           actions[idx],
+                                           option_dim=option_dim,
+                                           policy=student.state_prior.model
+                                           )  # demo_len x 1 x ct
+                log_opts = log_prob_option(st,
+                                           student.state_prior.option_model,
+                                           option_dim)
+                log_acts = log_acts.reshape([-1, 1, option_dim])
+                transition = log_opts * log_acts
+                transition = transition[0]
+                # transition = torch.log(log_prob)
+            else:
+                transition = xsat_given_xsaprev_xj(
+                    h, idx, states, actions, student,  j_value=[student.annotated_options[traj_num][h]]
+                    )
+            transition = transition.detach().cpu().numpy()
+            # res = backward_array[0]
+            res = backward_array[0] @ transition.T
+            if h==idx-1:
+                mask = np.arange(len(res))==value_h
+                res[~mask] = np.nan
+        backward_array.insert(0, res)
+    return np.array(backward_array)
+
+def prob_rain(
+        states,
+        actions,
+        traj_num,
+        student,
+        option_dim=7):
+    fw = clean_forward_msg(
+        states,
+        actions,
+        traj_num,
+        student,
+        option_dim=7)[1:]
+    bw = backward_clean_msg(
+        states,
+        actions,
+        traj_num,
+        student,
+        option_dim=7)[1:]
+    # bw = bw[:-1]
+    res = np.nan_to_num(fw*bw)
+    
+    res = res / res.sum(1)[...,np.newaxis]
+    return res
