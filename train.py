@@ -189,6 +189,16 @@ class Workspace:
                 self.train_loader, desc=f"Training prior epoch {self.prior_epoch}"
             )
             for data in pbar:
+                if not self.student.single_query_only:
+                    print("Querying oracle!")
+                    self.train_set.dataset.dataset.query_oracle(self.student)
+                    import time
+                    now = time.perf_counter()
+                    self.train_set.dataset.dataset.update_options(
+                        self.student)
+                    transcurrido = time.perf_counter()-now
+                    print("Elapsed time", transcurrido)
+
                 observations, action, mask, option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
@@ -212,19 +222,19 @@ class Workspace:
                 self.log_append("option_train", len(observations), {'cross_entropy': loss2})
                 self.log_append("prior_train", len(observations), loss_components)
 
-    def train_init_state(self):
+    def train_init_state(self, epoch):
+        # Train for one epoch
         self.init_prob.train()
-        for epoch in range(50):
-            total = 0
-            for observations, _, _, option in self.init_dataloader:
-                self.init_optimizer.zero_grad()
-                obs, targets = observations.to(self.device), option.to(self.device)
-                logits = self.init_prob(obs)
-                loss = self.init_criterion(logits, targets.to(torch.float))
-                total += loss.item()
-                loss.backward()
-                self.init_optimizer.step()
-            print("Training init distr; epoch ", epoch, "with loss", total)
+        total = 0
+        for observations, _, _, option in self.init_dataloader:
+            self.init_optimizer.zero_grad()
+            obs, targets = observations.to(self.device), option.to(self.device)
+            logits = self.init_prob(obs)
+            loss = self.init_criterion(logits, targets.to(torch.float))
+            total += loss.item()
+            loss.backward()
+            self.init_optimizer.step()
+        print("Training init distr; epoch ", epoch, "with loss", total)
 
     def eval_prior(self):
         with utils.eval_mode(
@@ -263,8 +273,6 @@ class Workspace:
         if self.cfg.lazy_init_models:
             self._init_obs_encoding_net()
             self._init_action_ae()
-        
-        self.train_init_state()
         self.action_ae.fit_model(
             self.train_loader,
             self.test_loader,
@@ -289,6 +297,7 @@ class Workspace:
         #         self.eval_option()
         #     self.flush_log(epoch=epoch + self.epoch, iterator=self.option_model_iterator)
         #     self.option_epoch += 1
+
         if self.student.single_query_only:
             print("Querying oracle!")
             self.train_set.dataset.dataset.query_oracle(self.student)
@@ -306,6 +315,7 @@ class Workspace:
         for epoch in self.state_prior_iterator:
             self.prior_epoch = epoch
             self.train_prior()
+            self.train_init_state(epoch)
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
                 self.eval_prior()
             self.flush_log(epoch=epoch + self.epoch, iterator=self.state_prior_iterator)

@@ -1,31 +1,104 @@
+import dataclasses
+import torch
+import numpy as np
 
+
+from .base import CuriousPupil
+from dataloaders.fb_algorithm_latent import 
 
 @dataclasses.dataclass
-class GradientBasedStudent(CuriousPupil):
-    student_type: str = 'gradient'
-    
-
-@dataclasses.dataclass
-class EfficientStudent(CuriousPupil):
-    """Student that accesses all info, but stores only the
-    states at the change of the latent state"""
-    student_type: str = 'efficient'
+class IntentEntropyBased(CuriousPupil):
+    student_type: str = 'intent_entropy'
 
     def query_oracle(self, num_queries=1):
+        for _ in range(num_queries):
+            self._query_oracle()
+
+    def _query_oracle(self):
+        """Will query oracle on all trajectories and states, randomly"""
+        
+        top_entropies = []
+        top_entropies_idx = []
+
+        # idx = idx_traj = np.random.randint(len(self.demos))
+        # ent_idx, ent = self._get_info_single_demo(idx)
+        # top_entropy_idx = ent_idx
+        # top_entropies.append(ent)
+        # top_entropies_idx.append(ent_idx)
         for idx in range(len(self.demos)):
-            self._query_single_demo(idx)
-        self._num_queries += 1
+            ent_idx, ent = self._get_info_single_demo(idx)
+            top_entropies.append(ent)
+            top_entropies_idx.append(ent_idx)
+            idx += 1
 
-    def _query_single_demo(self, idx):
+        top_entropies = np.array(top_entropies)
+        top_entropy = (top_entropies).max()
+        idxs = np.where(top_entropies == top_entropy)[0]
+        idx_traj = np.random.choice(idxs)
+        top_entropy_idx = top_entropies_idx[idx_traj]
+        # idx_traj = np.argmax(top_entropies)
+        # top_entropy_idx = top_entropies_idx[idx_traj]
+        if top_entropy_idx is not None:
+            self.log_query(idx_traj, top_entropy_idx)
+            self._num_queries += 1
+
+    def _get_info_single_demo(self, traj_num):
         demo = self.demos[idx]
+        entropy = demo.entropy()
+        top_entropy = entropy[1:].max()
+        idxs = np.where(entropy == top_entropy)[0]
+        top_entropy_idx = np.random.choice(idxs) - 1
+        return top_entropy_idx, top_entropy
+    
+    def _get_entropy(self, traj_num):
+        return None
+        demo = oracle.true_options[traj_num]
+        n = set(list(range(len(demo))))
+        unlabeled_idxs = n - self.list_queries.get(traj_num, set())
+        if len(unlabeled_idxs) > 0:
+            idx_query = np.random.choice(list(unlabeled_idxs))
+            self.log_query(traj_num, idx_query)
+            self.annotated_options[traj_num, idx_query] = oracle.query(
+                traj_num, idx_query)
+        else:
+            logging.warn("All latent states in demo have been queried")
 
-        option_1 = self.oracle.query(idx, 0)
-        demo.set_true_latent(0, option_1)
-        for j in range(1, len(demo.obs)):
-            option = self.oracle.query(idx, j)
-            if option!=option_1:
-                option_1=option
-                self.log_query(idx, j)
+class MaxInformationGain(CuriousPupil):
+    student_type: str = 'information_gail'
+    single_query_only: bool = False
+
+    def query_oracle(self, oracle, num_queries=1):
+        raise NotImplementedError
+        if self.annotated_options is None:
+            self.annotated_options = np.ones(oracle.true_options.shape)
+            self.annotated_options[:] = None
+
+        for _ in range(num_queries):
+            traj_num = np.random.randint(len(oracle.true_options))
+            self._query_single_demo(oracle, traj_num)
+            self._num_queries += 1
+
+    def _query_single_demo(self, oracle, traj_num):
+        raise NotImplementedError
+        # Query intent at a random timestep of the demo
+        demo = oracle.true_options[traj_num]
+        n = set(list(range(len(demo))))
+        unlabeled_idxs = n - self.list_queries.get(traj_num, set())
+        if len(unlabeled_idxs) > 0:
+            idx_query = np.random.choice(list(unlabeled_idxs))
+            self.log_query(traj_num, idx_query)
+            self.annotated_options[traj_num, idx_query] = oracle.query(
+                traj_num, idx_query)
+        else:
+            logging.warn("All latent states in demo have been queried")
+
+    def expected_infogain(self):
+        # For each timestep, get the information gain of querying at that timestep
+        expected_infogain = []
+        for idx in range(len(trajectory)):
+            for value in range(self.option_dim):
+                prob
+
 
 
 @dataclasses.dataclass
@@ -67,7 +140,6 @@ class ActionEntropyBased(CuriousPupil):
         if unlabeled_idxs.size > 0:
             observations = demo.obs[unlabeled_idxs]
             options = demo.latent[unlabeled_idxs+1]
-            import torch
             with torch.no_grad():
                 lo_input = obs_as_tensor(
                     np.concatenate([observations, options], axis=1),
@@ -81,50 +153,6 @@ class ActionEntropyBased(CuriousPupil):
     
         return top_entropy_idx, top_entropy
 
-
-@dataclasses.dataclass
-class IntentEntropyBased(CuriousPupil):
-    student_type: str = 'intent_entropy'
-
-    def query_oracle(self, num_queries=1):
-        for _ in range(num_queries):
-            self._query_oracle()
-
-    def _query_oracle(self):
-        """Will query oracle on all trajectories and states, randomly"""
-        
-        top_entropies = []
-        top_entropies_idx = []
-
-        # idx = idx_traj = np.random.randint(len(self.demos))
-        # ent_idx, ent = self._get_info_single_demo(idx)
-        # top_entropy_idx = ent_idx
-        # top_entropies.append(ent)
-        # top_entropies_idx.append(ent_idx)
-        for idx in range(len(self.demos)):
-            ent_idx, ent = self._get_info_single_demo(idx)
-            top_entropies.append(ent)
-            top_entropies_idx.append(ent_idx)
-            idx += 1
-
-        top_entropies = np.array(top_entropies)
-        top_entropy = (top_entropies).max()
-        idxs = np.where(top_entropies == top_entropy)[0]
-        idx_traj = np.random.choice(idxs)
-        top_entropy_idx = top_entropies_idx[idx_traj]
-        # idx_traj = np.argmax(top_entropies)
-        # top_entropy_idx = top_entropies_idx[idx_traj]
-        if top_entropy_idx is not None:
-            self.log_query(idx_traj, top_entropy_idx)
-            self._num_queries += 1
-
-    def _get_info_single_demo(self, idx):
-        demo = self.demos[idx]
-        entropy = demo.entropy()
-        top_entropy = entropy[1:].max()
-        idxs = np.where(entropy == top_entropy)[0]
-        top_entropy_idx = np.random.choice(idxs) - 1
-        return top_entropy_idx, top_entropy
 
 @dataclasses.dataclass
 class ActionIntentEntropyBased(CuriousPupil):
@@ -181,4 +209,3 @@ class ActionIntentEntropyBased(CuriousPupil):
 
         top_entropy_idx = entropies.argmax()
         return top_entropy_idx, entropies[top_entropy_idx]
-

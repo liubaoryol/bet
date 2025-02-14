@@ -16,7 +16,7 @@ class IterativeRandom(CuriousPupil):
             self.annotated_options[:] = None
 
         for _ in range(num_queries):
-            traj_num = np.random.randint(len(self.oracle.true_options))
+            traj_num = np.random.randint(len(oracle.true_options))
             self._query_single_demo(oracle, traj_num)
             self._num_queries += 1
 
