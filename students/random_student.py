@@ -6,7 +6,7 @@ from .base import CuriousPupil
 
 
 @dataclasses.dataclass
-class IterativeRandom(CuriousPupil):
+class Iterativerandom(CuriousPupil):
     student_type: str = 'iterative_random'
     single_query_only: bool = False
 
@@ -14,11 +14,14 @@ class IterativeRandom(CuriousPupil):
         if self.annotated_options is None:
             self.annotated_options = np.ones(oracle.true_options.shape)
             self.annotated_options[:] = None
-
+        changed_trjs = set()
         for _ in range(num_queries):
             traj_num = np.random.randint(len(oracle.true_options))
-            self._query_single_demo(oracle, traj_num)
+            changed = self._query_single_demo(oracle, traj_num)
             self._num_queries += 1
+            if changed:
+                changed_trjs.add(traj_num)
+        return changed_trjs
 
     def _query_single_demo(self, oracle, traj_num):
         # Query intent at a random timestep of the demo
@@ -30,12 +33,13 @@ class IterativeRandom(CuriousPupil):
             self.log_query(traj_num, idx_query)
             self.annotated_options[traj_num, idx_query] = oracle.query(
                 traj_num, idx_query)
+            return True
         else:
             logging.warn("All latent states in demo have been queried")
 
 @dataclasses.dataclass
 class Random(CuriousPupil):
-    query_percent: float = 0
+    query_percent: float = 0.2
     student_type: str = f'query_percent{query_percent}'
     single_query_only: bool = True
 
@@ -47,17 +51,26 @@ class Random(CuriousPupil):
         # Intended to be used only once
         if self._num_queries > 0:
             return 
+        
+        changed_trjs = set()
         for traj_num in range(len(oracle.true_options)):
-            self._query_single_demo(oracle, traj_num)
+            changed = self._query_single_demo(oracle, traj_num)
+            if changed:
+                changed_trjs.add(traj_num)
         self._num_queries += 1
+        return changed_trjs
 
     def _query_single_demo(self, oracle, traj_num):
         demo = oracle.true_options[traj_num]
+        changed=False
         for idx_query in range(len(demo)):
             if np.random.uniform() <= self.query_percent:
                 self.log_query(traj_num, idx_query)
                 self.annotated_options[traj_num, idx_query] = oracle.query(
                     traj_num, idx_query)
+                changed = True
+        return changed
+                    
                 
 @dataclasses.dataclass
 class QueryCapLimit(CuriousPupil):
@@ -73,18 +86,26 @@ class QueryCapLimit(CuriousPupil):
         # Intended to be used only once
         if self._num_queries > 0:
             return 
+        
+        changed_trjs = set()
         for traj_num in range(len(oracle.true_options)):
-            self._query_single_demo(oracle, traj_num)
+            changed = self._query_single_demo(oracle, traj_num)
+            if changed:
+                changed_trjs.add(traj_num)
         self._num_queries += 1
+        return changed_trjs
 
     def _query_single_demo(self, oracle, traj_num):
         demo = oracle.true_options[traj_num]
         n = len(demo)
+        changed = False
         idxs = np.random.choice(range(n), size=min(self.query_demo_cap, n), replace=True)
         for idx_query in idxs:
             self.log_query(traj_num, j)
             self.annotated_options[traj_num, idx_query] = oracle.query(
                 traj_num, idx_query)
+            changed=True
+        return changed
 
 
 @dataclasses.dataclass

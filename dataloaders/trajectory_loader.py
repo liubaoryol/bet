@@ -3,6 +3,7 @@ import einops
 import os
 import torch
 import torch.nn as nn
+import time
 from copy import deepcopy as copy
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, Dataset
@@ -20,6 +21,9 @@ from tqdm import tqdm
 import envs
 import gym
 from students.base import Oracle
+from dataloaders.fb_algorithm_latent import (update_latent_viterbi,
+                                             prob_latent)
+
 
 OBS_ELEMENT_INDICES = {
     "bottom burner": np.array([11, 12]),
@@ -78,48 +82,63 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         self.oracle = Oracle(true_options=gt_options)
         # observations = observations[:,:,:11]
         # TODO: Find self._gt_options and self._available_gt_options -> student.annotated_opts
-        self.options = np.zeros_like(masks)
+        masks = torch.from_numpy(masks).to(device).float()
+        self.options = torch.zeros_like(masks).int()
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
-            torch.from_numpy(masks).to(device).float(),
-            torch.from_numpy(self.options).to(device).int()
+            masks,
+            self.options
         )
         # self.visualize()
         self.actions = self.tensors[1]
 
     def query_oracle(self, student):
-        student.query_oracle(self.oracle)
-        
-    def update_options(self, student, pdb=False):
-        observations, actions, masks, options = self.tensors
-        self.options = self.estimate_options(
-            observations=np.array(observations),
-            actions=actions,
-            student=student,
-            pdb=pdb)
-        self.options = torch.from_numpy(self.options).to(observations.device).int()
-        self.tensors = (observations, actions, masks, self.options)
+        return student.query_oracle(self.oracle)
 
-    def estimate_options(
+    def update_options(self, student):
+        print("Estimating options for all trajectories. Please wait...")
+        now = time.perf_counter()
+        for traj_num in range(len(self)):
+            self.update_options_of_traj(student, traj_num)
+        transcurrido = time.perf_counter()-now
+        print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
+
+
+    def update_options_of_traj(
             self,
-            observations,
-            actions,
-            student, pdb=False
-            ) -> np.ndarray:
-        from dataloaders.fb_algorithm_latent import update_latent_viterbi
-        true_options = []
-        for traj_num, (obs, acts) in enumerate(zip(observations, actions)):
-            print("Traj num", traj_num)
-            opts = update_latent_viterbi(
-                states=obs,
-                actions=acts,
-                traj_num=traj_num,
-                student=student,
-                option_dim=7, pdb=pdb)
-            true_options.append(opts)
-        return np.stack(true_options).squeeze(-1)
-
+            student,
+            traj_num
+            ):
+        observations, actions, masks, _ = self.tensors
+        obs = observations[traj_num][masks[traj_num].to(bool)]
+        acts = actions[traj_num][masks[traj_num].to(bool)]
+        opts = update_latent_viterbi(
+            states=np.array(obs),
+            actions=acts,
+            traj_num=traj_num,
+            student=student,
+            option_dim=7)
+        self.options[traj_num][:len(obs)] = torch.from_numpy(opts.squeeze(1))
+        self.tensors = (observations, actions, masks, self.options)
+    
+    def get_entropy(
+            self,
+            student,
+            traj_num):
+        observations, actions, masks, _ = self.tensors
+        obs = observations[traj_num][masks[traj_num].to(bool)]
+        acts = actions[traj_num][masks[traj_num].to(bool)]
+        def entropy(tensor):
+            return -(tensor * torch.log(tensor)).nansum(1)
+        probs = prob_latent(
+            states=np.array(obs),
+            actions=acts,
+            traj_num=traj_num,
+            student=student,
+            option_dim=7)
+        return entropy(torch.from_numpy(probs))
+    
     def _calculate_gt_options(self, observations):
         true_options = []
         for episode in observations:

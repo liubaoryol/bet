@@ -11,11 +11,11 @@ lazy_init_models: False
 # Dataset details
 train_fraction: 0.95
 batch_size: 64
-num_workers: 32
+num_workers: 16
 window_size: 10
 
 # Supervision parameters
-student_type: supervised # unsupervised, IterativeRandom, QueryCapLimit, Random
+student_type: iterativerandom # unsupervised, IterativeRandom, QueryCapLimit, Random
 
 # Training details
 num_training_epochs: 1
@@ -42,7 +42,7 @@ eval_every: 1
 save_every: 1
 
 # Wandb config
-project: behavior_transformer_repro_test
+project: behavior_transformer_students
 experiment: kitchen_train
 
 hydra:

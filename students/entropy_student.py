@@ -4,7 +4,8 @@ import numpy as np
 
 
 from .base import CuriousPupil
-from dataloaders.fb_algorithm_latent import 
+from dataloaders.fb_algorithm_latent import (clean_forward_msg,
+                                             clean_backward_msg)
 
 @dataclasses.dataclass
 class IntentEntropyBased(CuriousPupil):
@@ -43,7 +44,7 @@ class IntentEntropyBased(CuriousPupil):
             self._num_queries += 1
 
     def _get_info_single_demo(self, traj_num):
-        demo = self.demos[idx]
+        demo = self.demos[traj_num]
         entropy = demo.entropy()
         top_entropy = entropy[1:].max()
         idxs = np.where(entropy == top_entropy)[0]

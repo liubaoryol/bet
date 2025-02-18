@@ -1,6 +1,8 @@
 import logging
 from collections import OrderedDict
 from pathlib import Path
+from datetime import datetime
+import time
 
 import hydra
 import torch
@@ -18,6 +20,8 @@ from students import random_student #IterativeRandom, Supervised, Unsupervised, 
 import utils
 import wandb
 
+
+timestamp = lambda: datetime.now().strftime('-%m-%d_%H-%M')
 
 class minorCustomData(RelayKitchenTrajectoryDataset):
     def __init__(self,  data_directory, device="cpu"):
@@ -82,7 +86,8 @@ class Workspace:
         self.student = getattr(random_student, cfg.student_type.capitalize())(
             option_dim=7,
             state_prior=self.state_prior,
-            action_ae=self.action_ae)
+            action_ae=self.action_ae,
+            dataset=self.train_set.dataset.dataset)
         # self.student2 = Unsupervised(option_dim=7)
         # self.student3 = IterativeRandom(option_dim=7)
         # self.student4 = QueryCapLimit(option_dim=7, query_demo_cap=30)
@@ -97,6 +102,7 @@ class Workspace:
         self.wandb_run = wandb.init(
             dir=str(self.work_dir),
             project=cfg.project,
+            name=self.student.student_type+'Student'+timestamp(),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
         wandb.config.update(
@@ -183,22 +189,25 @@ class Workspace:
     #             self.option_optimizer.step()
 
     def train_prior(self):
+        self.query_time = True
+        number = 0
         self.state_prior.train()
         with utils.eval_mode(self.obs_encoding_net, self.action_ae):
             pbar = tqdm.tqdm(
                 self.train_loader, desc=f"Training prior epoch {self.prior_epoch}"
             )
             for data in pbar:
+                number +=1
                 if not self.student.single_query_only:
-                    print("Querying oracle!")
-                    self.train_set.dataset.dataset.query_oracle(self.student)
-                    import time
-                    now = time.perf_counter()
-                    self.train_set.dataset.dataset.update_options(
-                        self.student)
-                    transcurrido = time.perf_counter()-now
-                    print("Elapsed time", transcurrido)
-
+                    if self.query_time:
+                        trjs_changed = self.train_set.dataset.dataset.query_oracle(self.student)
+                        for traj_num in trjs_changed:
+                            self.train_set.dataset.dataset.update_options_of_traj(
+                                self.student,
+                                traj_num)
+                # if not number%20:
+                #     self.train_set.dataset.dataset.update_options(
+                #         self.student)
                 observations, action, mask, option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
@@ -221,20 +230,6 @@ class Workspace:
                 self.option_optimizer.step()
                 self.log_append("option_train", len(observations), {'cross_entropy': loss2})
                 self.log_append("prior_train", len(observations), loss_components)
-
-    def train_init_state(self, epoch):
-        # Train for one epoch
-        self.init_prob.train()
-        total = 0
-        for observations, _, _, option in self.init_dataloader:
-            self.init_optimizer.zero_grad()
-            obs, targets = observations.to(self.device), option.to(self.device)
-            logits = self.init_prob(obs)
-            loss = self.init_criterion(logits, targets.to(torch.float))
-            total += loss.item()
-            loss.backward()
-            self.init_optimizer.step()
-        print("Training init distr; epoch ", epoch, "with loss", total)
 
     def eval_prior(self):
         with utils.eval_mode(
@@ -264,6 +259,20 @@ class Workspace:
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
                 self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
 
+    def train_init_state(self, epoch):
+        # Train for one epoch
+        self.init_prob.train()
+        total = 0
+        for observations, _, _, option in self.init_dataloader:
+            self.init_optimizer.zero_grad()
+            obs, targets = observations.to(self.device), option.to(self.device)
+            logits = self.init_prob(obs)
+            loss = self.init_criterion(logits, targets.to(torch.float))
+            total += loss.item()
+            loss.backward()
+            self.init_optimizer.step()
+        print("Training init distr; epoch ", epoch, "with loss", total)
+        
     def run(self):
         snapshot = self.snapshot
         if snapshot.exists():
@@ -301,12 +310,9 @@ class Workspace:
         if self.student.single_query_only:
             print("Querying oracle!")
             self.train_set.dataset.dataset.query_oracle(self.student)
-            import time
-            now = time.perf_counter()
             self.train_set.dataset.dataset.update_options(
                 self.student)
-            transcurrido = time.perf_counter()-now
-            print("Elapsed time", transcurrido)
+            
         self.state_prior_iterator = tqdm.trange(
             self.prior_epoch, self.cfg.num_prior_epochs
         )
@@ -314,7 +320,8 @@ class Workspace:
 
         for epoch in self.state_prior_iterator:
             self.prior_epoch = epoch
-            self.train_prior()
+            self.train_prior()  # Trains prior and queries oracle
+            self.train_set.dataset.dataset.update_options(self.student)
             self.train_init_state(epoch)
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
                 self.eval_prior()

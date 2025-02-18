@@ -3,7 +3,7 @@ import pickle
 import logging
 import dataclasses
 import numpy as np
-from typing import List
+from typing import List, Any
 from abc import ABC, abstractmethod
 
 from models.action_ae.discretizers.k_means import KMeansDiscretizer
@@ -100,6 +100,7 @@ class CuriousPupil(ABC):
     annotated_options: np.ndarray = None
     state_prior: MinGPT = None
     action_ae: KMeansDiscretizer = None
+    dataset: Any = None
     
     def __post_init__(self):
         self._num_queries = 0
