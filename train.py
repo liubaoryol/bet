@@ -88,10 +88,6 @@ class Workspace:
             state_prior=self.state_prior,
             action_ae=self.action_ae,
             dataset=self.train_set.dataset.dataset)
-        # self.student2 = Unsupervised(option_dim=7)
-        # self.student3 = IterativeRandom(option_dim=7)
-        # self.student4 = QueryCapLimit(option_dim=7, query_demo_cap=30)
-        # self.student5 = Random(option_dim=7, query_percent=0.1)
 
         self.log_components = OrderedDict()
         self.epoch = self.prior_epoch = self.option_epoch = 0
@@ -170,23 +166,7 @@ class Workspace:
             num_workers=self.cfg.num_workers,
             pin_memory=True,
         )
-    # def train_option(self):
-    #     self.state_prior.train()
-    #     with utils.eval_mode(self.obs_encoding_net, self.action_ae):
-    #         pbar = tqdm.tqdm(
-    #             self.train_loader, desc=f"Training option epoch {self.option_epoch}"
-    #         )
-    #     for data in pbar:
-    #             observations, action, mask, option = data
-    #             self.option_optimizer.zero_grad(set_to_none=True)
-    #             obs, act = observations.to(self.device), action.to(self.device)
-    #             enc_obs = self.obs_encoding_net(obs)
-    #             # import pdb; pdb.set_trace()
-    #             _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
-    #             loss2.backward()
-    #             self.log_append("option_train", len(observations), {'cross_entropy': loss2})
-    #             torch.nn.utils.clip_grad_norm_(self.state_prior.option_model.parameters(), self.cfg.grad_norm_clip)
-    #             self.option_optimizer.step()
+
 
     def train_prior(self):
         self.query_time = True
@@ -260,16 +240,6 @@ class Workspace:
                 self.log_append("option_eval", len(observations), {
                     'cross_entropy': loss2, 
                     'gt_cross_entropy': loss3})
-                
-    # def eval_option(self):
-    #     with utils.eval_mode(
-    #         self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
-    #     ):
-    #         for observations, action, mask, option in self.test_loader:
-    #             obs, act = observations.to(self.device), action.to(self.device)
-    #             enc_obs = self.obs_encoding_net(obs)
-    #             _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
-    #             self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
 
     def train_init_state(self, epoch):
         # Train for one epoch
@@ -306,18 +276,6 @@ class Workspace:
         if self.cfg.lazy_init_models:
             self._init_state_prior()
         self.log_components = OrderedDict()
-        # Reset the log.
-        # self.option_model_iterator = tqdm.trange(
-        #     self.option_epoch, 50
-        # )
-        # self.option_model_iterator.set_description("Training option model: ")
-        # for epoch in self.option_model_iterator:
-        #     self.option_epoch = epoch
-        #     self.train_option()
-        #     if ((self.option_epoch + 1) % self.cfg.eval_prior_every) == 0:
-        #         self.eval_option()
-        #     self.flush_log(epoch=epoch + self.epoch, iterator=self.option_model_iterator)
-        #     self.option_epoch += 1
 
         if self.student.single_query_only:
             print("Querying oracle!")
@@ -342,10 +300,6 @@ class Workspace:
             if ((self.prior_epoch + 1) % self.cfg.save_prior_every) == 0:
                 self.save_snapshot()
 
-        # self.train_set.dataset.dataset.update_options(
-        #     self.student,
-        #     pdb=True)
-        # expose DataParallel module class name for wandb tags
         tag_func = (
             lambda m: m.module.__class__.__name__
             if self.cfg.data_parallel

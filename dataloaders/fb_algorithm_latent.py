@@ -205,21 +205,6 @@ def clean_forward_msg(
         student,
         option_dim
         )
-    # actions = student.action_ae.encode_into_latent(actions.to(device))[0]
-    # actions = actions.squeeze(1)
-    # states = torch.from_numpy(states.astype('float32'))
-    # states = states.unsqueeze(1).to(device)
-
-    # option_model = student.state_prior.option_model
-    # policy = student.state_prior.model
-    # option_model.eval()
-    # policy.eval()
-    # log_opts_full = log_prob_option(states, option_model)
-    # log_acts_full = log_prob_action(states,
-    #                            actions,
-    #                            option_dim=option_dim,
-    #                            policy=policy
-    #                            )
     
     N = len(states)
     known_latents = student.list_queries.get(traj_num, set()) - set(range(N, 410))
