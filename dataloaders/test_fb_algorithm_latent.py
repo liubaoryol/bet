@@ -26,7 +26,7 @@ from dataloaders.fb_algorithm_latent import (approx_time_transition,
 from dataloaders.test_config import cfg
 import workspaces.adept_kitchen
 from dataloaders.trajectory_loader import get_relay_kitchen_train_val
-from students import random_student
+import students as random_student
 
 
 model = workspaces.adept_kitchen.AdeptKitchenWorkspace(cfg)
@@ -37,7 +37,7 @@ train_set, _ = get_relay_kitchen_train_val(
     device=cfg.device
 )
 dataset = train_set.dataset.dataset
-observations, actions, masks, _ = dataset.tensors
+observations, actions, masks, _, _ = dataset.tensors
 observations = observations.to(cfg.device)
 actions = actions.to(cfg.device)
 
@@ -262,7 +262,9 @@ def test_bwd_msg():
         correct_pred = opts==bwd_msg_uns.argmax(1)
         k = np.where(~correct_pred)
         print(len(k[0]))
-        k = np.random.choice( np.where(~correct_pred)[0])
+        if len(k[0])==0:
+            continue
+        k = np.random.choice(k[0])
 
         true_opt = dataset.oracle.query(traj_num, k)
         student2.log_query(traj_num, k)

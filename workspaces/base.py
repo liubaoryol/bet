@@ -145,7 +145,7 @@ class Workspace:
             action, latents, option = self._get_action(
                 obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
-            print("Option:", option)
+            # print("Option:", option)
             if option != self.curr_option:
                 print("Option selected is: ", option)
                 if len(sequence)==0:

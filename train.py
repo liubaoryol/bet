@@ -16,7 +16,7 @@ from models.latent_generators.latent_generator import LatentGeneratorDataParalle
 from omegaconf import OmegaConf
 from dataloaders.trajectory_loader import RelayKitchenTrajectoryDataset
 from students.base import Oracle
-from students import random_student #IterativeRandom, Supervised, Unsupervised, QueryCapLimit, Random
+import students
 import utils
 import wandb
 
@@ -83,7 +83,7 @@ class Workspace:
         )
         self.train_set, self.test_set = self.dataset
         self._setup_loaders()
-        self.student = getattr(random_student, cfg.student_type.capitalize())(
+        self.student = getattr(students, cfg.student_type.capitalize())(
             option_dim=7,
             state_prior=self.state_prior,
             action_ae=self.action_ae,
@@ -198,6 +198,7 @@ class Workspace:
             )
             for data in pbar:
                 number +=1
+                self.train_set.dataset.dataset.get_entropy(self.student)
                 if not self.student.single_query_only:
                     if self.query_time:
                         trjs_changed = self.train_set.dataset.dataset.query_oracle(self.student)
@@ -208,7 +209,7 @@ class Workspace:
                 # if not number%20:
                 #     self.train_set.dataset.dataset.update_options(
                 #         self.student)
-                observations, action, mask, option = data
+                observations, action, mask, option, gt_option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
@@ -222,20 +223,25 @@ class Workspace:
                 
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
                 loss2.backward()
+                targets = gt_option.to(enc_obs.device)[:,1:]
+                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+                loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
 
                 torch.nn.utils.clip_grad_norm_(
                     self.state_prior.parameters(), self.cfg.grad_norm_clip
                 )
                 self.state_prior_optimizer.step()
                 self.option_optimizer.step()
-                self.log_append("option_train", len(observations), {'cross_entropy': loss2})
+                self.log_append("option_train", len(observations), {
+                    'cross_entropy': loss2, 
+                    'gt_cross_entropy': loss3})
                 self.log_append("prior_train", len(observations), loss_components)
 
     def eval_prior(self):
         with utils.eval_mode(
             self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
         ):
-            for observations, action, mask, option in self.test_loader:
+            for observations, action, mask, option, gt_option in self.test_loader:
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
@@ -247,17 +253,23 @@ class Workspace:
                 self.log_append("prior_eval", len(observations), loss_components)
 
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
-                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
-
-    def eval_option(self):
-        with utils.eval_mode(
-            self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
-        ):
-            for observations, action, mask, option in self.test_loader:
-                obs, act = observations.to(self.device), action.to(self.device)
-                enc_obs = self.obs_encoding_net(obs)
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
-                self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
+                
+                targets = gt_option.to(enc_obs.device)[:,1:]
+                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+                loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
+                self.log_append("option_eval", len(observations), {
+                    'cross_entropy': loss2, 
+                    'gt_cross_entropy': loss3})
+                
+    # def eval_option(self):
+    #     with utils.eval_mode(
+    #         self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
+    #     ):
+    #         for observations, action, mask, option in self.test_loader:
+    #             obs, act = observations.to(self.device), action.to(self.device)
+    #             enc_obs = self.obs_encoding_net(obs)
+    #             _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
+    #             self.log_append("option_eval", len(observations), {'cross_entropy': loss2})
 
     def train_init_state(self, epoch):
         # Train for one epoch

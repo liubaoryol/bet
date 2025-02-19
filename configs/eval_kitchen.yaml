@@ -30,7 +30,7 @@ start_from_seen: False
 record_video: False
 
 # Wandb setup
-project: behavior_transformer_repro_test
+project: behavior_transformer_eval
 experiment: kitchen_eval
 
 hydra:

@@ -8,68 +8,51 @@ from dataloaders.fb_algorithm_latent import (clean_forward_msg,
                                              clean_backward_msg)
 
 @dataclasses.dataclass
-class IntentEntropyBased(CuriousPupil):
+class Latent_entropy_based(CuriousPupil):
     student_type: str = 'intent_entropy'
+    single_query_only: bool = False
 
-    def query_oracle(self, num_queries=1):
-        for _ in range(num_queries):
-            self._query_oracle()
+    def query_oracle(self, oracle, num_queries=1):
+        if self.annotated_options is None:
+            self.annotated_options = np.ones(oracle.true_options.shape)
+            self.annotated_options[:] = None
+        changed_trjs = set()
+        if not getattr(self.dataset, 'entropies', False):
+            print("Entropies not estimated before hand.")
+            self.dataset.get_entropy(self)
 
-    def _query_oracle(self):
-        """Will query oracle on all trajectories and states, randomly"""
-        
-        top_entropies = []
-        top_entropies_idx = []
-
-        # idx = idx_traj = np.random.randint(len(self.demos))
-        # ent_idx, ent = self._get_info_single_demo(idx)
-        # top_entropy_idx = ent_idx
-        # top_entropies.append(ent)
-        # top_entropies_idx.append(ent_idx)
-        for idx in range(len(self.demos)):
-            ent_idx, ent = self._get_info_single_demo(idx)
-            top_entropies.append(ent)
-            top_entropies_idx.append(ent_idx)
-            idx += 1
-
-        top_entropies = np.array(top_entropies)
-        top_entropy = (top_entropies).max()
-        idxs = np.where(top_entropies == top_entropy)[0]
-        idx_traj = np.random.choice(idxs)
-        top_entropy_idx = top_entropies_idx[idx_traj]
-        # idx_traj = np.argmax(top_entropies)
-        # top_entropy_idx = top_entropies_idx[idx_traj]
-        if top_entropy_idx is not None:
-            self.log_query(idx_traj, top_entropy_idx)
-            self._num_queries += 1
-
-    def _get_info_single_demo(self, traj_num):
-        demo = self.demos[traj_num]
-        entropy = demo.entropy()
-        top_entropy = entropy[1:].max()
-        idxs = np.where(entropy == top_entropy)[0]
-        top_entropy_idx = np.random.choice(idxs) - 1
-        return top_entropy_idx, top_entropy
-    
-    def _get_entropy(self, traj_num):
-        return None
-        demo = oracle.true_options[traj_num]
-        n = set(list(range(len(demo))))
-        unlabeled_idxs = n - self.list_queries.get(traj_num, set())
-        if len(unlabeled_idxs) > 0:
-            idx_query = np.random.choice(list(unlabeled_idxs))
+        shape = oracle.true_options.shape
+        entropies_arr = np.zeros(shape)
+        for traj_num, entr in enumerate(self.dataset.entropies):
+            entropies_arr[traj_num][:len(entr)] = entr
+        argss = np.argpartition(entropies_arr.reshape(-1), -num_queries)[-num_queries:]
+        argss = entropies_arr.reshape(-1)[argss]
+        idxs = np.in1d(entropies_arr, argss).reshape(entropies_arr.shape)
+        traj_nums, idx_queries = np.where(idxs)
+        for traj_num, idx_query in zip(traj_nums, idx_queries):
             self.log_query(traj_num, idx_query)
             self.annotated_options[traj_num, idx_query] = oracle.query(
-                traj_num, idx_query)
-        else:
-            logging.warn("All latent states in demo have been queried")
-
-class MaxInformationGain(CuriousPupil):
+            traj_num, idx_query)
+            changed_trjs.add(traj_num)
+        return changed_trjs
+        
+class Max_information_gain(CuriousPupil):
     student_type: str = 'information_gail'
     single_query_only: bool = False
 
     def query_oracle(self, oracle, num_queries=1):
         raise NotImplementedError
+    
+    def expected_infogain(self):
+        expected_infogain = []
+        for idx in range(len(evidence)):
+            res1 = prob_rain(evidence, {**known, **{idx:0}})
+            res2 = prob_rain(evidence, {**known, **{idx:1}})
+            res3 = prob_rain(evidence, {**known, **{idx:2}})
+            probs = prob_rain(evidence, known)[idx]
+            entr = (probs[0] * entropy(res1) + probs[1] * entropy(res2) + probs[2] * entropy(res3))
+            expected_infogain.append(entr.sum())
+        return np.array(expected_infogain)
         if self.annotated_options is None:
             self.annotated_options = np.ones(oracle.true_options.shape)
             self.annotated_options[:] = None

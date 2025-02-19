@@ -88,13 +88,15 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             torch.from_numpy(observations).to(device).float(),
             torch.from_numpy(actions).to(device).float(),
             masks,
-            self.options
+            self.options,
+            torch.from_numpy(gt_options).to(device).int()
+
         )
         # self.visualize()
         self.actions = self.tensors[1]
 
-    def query_oracle(self, student):
-        return student.query_oracle(self.oracle)
+    def query_oracle(self, student, num_queries=1):
+        return student.query_oracle(self.oracle, num_queries)
 
     def update_options(self, student):
         print("Estimating options for all trajectories. Please wait...")
@@ -110,7 +112,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             student,
             traj_num
             ):
-        observations, actions, masks, _ = self.tensors
+        observations, actions, masks, _, gt_opts = self.tensors
         obs = observations[traj_num][masks[traj_num].to(bool)]
         acts = actions[traj_num][masks[traj_num].to(bool)]
         opts = update_latent_viterbi(
@@ -120,13 +122,28 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             student=student,
             option_dim=7)
         self.options[traj_num][:len(obs)] = torch.from_numpy(opts.squeeze(1))
-        self.tensors = (observations, actions, masks, self.options)
+        self.tensors = (observations, actions, masks, self.options, gt_opts)
     
-    def get_entropy(
+    def get_entropy(self, student, save=True):
+        print("Estimating entropies. Please wait...")
+        now = time.perf_counter()
+        entropies = []
+        for traj_num in range(len(self)):
+            entropies.append(
+                self.get_entropy_of_traj(student, traj_num)
+            )
+        transcurrido = time.perf_counter()-now
+        print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
+
+        if save:
+            self.entropies=entropies
+        return entropies
+
+    def get_entropy_of_traj(
             self,
             student,
             traj_num):
-        observations, actions, masks, _ = self.tensors
+        observations, actions, masks, _, _ = self.tensors
         obs = observations[traj_num][masks[traj_num].to(bool)]
         acts = actions[traj_num][masks[traj_num].to(bool)]
         def entropy(tensor):

@@ -191,7 +191,9 @@ def clean_forward_msg(
         traj_num,
         student,
         option_dim=7):
-    
+    """
+    states: T x S_dim
+    """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     #TMP
@@ -270,8 +272,8 @@ def auxiliary_log_acts(
         option_dim=7):
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    actions = student.action_ae.encode_into_latent(actions.to(device))[0]
-    actions = actions.squeeze(1)
+    acts = student.action_ae.encode_into_latent(actions.to(device))[0]
+    acts = acts.squeeze(1)
     states = torch.from_numpy(states.astype('float32'))
     states = states.unsqueeze(1).to(device)
 
@@ -283,7 +285,7 @@ def auxiliary_log_acts(
     
     log_opts_full = log_prob_option(states, option_model)
     log_acts_full = log_prob_action(states,
-                               actions,
+                               acts,
                                option_dim=option_dim,
                                policy=policy
                                )
@@ -344,8 +346,9 @@ def clean_backward_msg(
             value_j = int(student.annotated_options[traj_num][idx-1])
             mask = np.arange(option_dim)==value_j
             res[~mask] = 0
-        if res.sum()==0:
-            import pdb; pdb.set_trace()
+        # if res.sum()==0:
+        #     import pdb; pdb.set_trace()
+        res = res/sum(res)
         backward_array.insert(0, res)
     return np.array(backward_array)
     #     #####

@@ -15,7 +15,7 @@ num_workers: 16
 window_size: 10
 
 # Supervision parameters
-student_type: iterativerandom # unsupervised, IterativeRandom, QueryCapLimit, Random
+student_type: latent_entropy_based # unsupervised, IterativeRandom, QueryCapLimit, Random
 
 # Training details
 num_training_epochs: 1

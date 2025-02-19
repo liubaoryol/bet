@@ -101,7 +101,7 @@ class QueryCapLimit(CuriousPupil):
         changed = False
         idxs = np.random.choice(range(n), size=min(self.query_demo_cap, n), replace=True)
         for idx_query in idxs:
-            self.log_query(traj_num, j)
+            self.log_query(traj_num, idx_query)
             self.annotated_options[traj_num, idx_query] = oracle.query(
                 traj_num, idx_query)
             changed=True
