@@ -4,5 +4,5 @@ from .random_student import (Supervised,
                             Iterativerandom,
                             QueryCapLimit
                             )
-from .entropy_student import (Latent_entropy_based,
-                             Max_information_gain)
+from .entropy_student import Latent_entropy_based
+from .ig_student import Max_information_gain

@@ -21,8 +21,10 @@ from tqdm import tqdm
 import envs
 import gym
 from students.base import Oracle
-from dataloaders.fb_algorithm_latent import (update_latent_viterbi,
-                                             prob_latent)
+from dataloaders.latent_estimation.parallelize_latent_estimation import (
+    paralellize_prob_latent,
+    paralellize_update_latent_viterbi)
+from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi
 
 
 OBS_ELEMENT_INDICES = {
@@ -58,7 +60,7 @@ ALL_TASKS = [
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
                  data_directory,
-                 device="cpu"):
+                 device="cuda"):
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -68,7 +70,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             observations, actions, masks
         )
         self.masks = masks
-
+        self.device = device
         # I will have three variables for holding options
         # Real options hold the ground truth options. These will be used for reference, 
         # or for when querying for the option, to have access to it. This is used only
@@ -101,9 +103,13 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
     def update_options(self, student):
         print("Estimating options for all trajectories. Please wait...")
         now = time.perf_counter()
-        for traj_num in range(len(self)):
-            self.update_options_of_traj(student, traj_num)
+        observations, actions, masks, _, gt_opts = self.tensors
+        opts = paralellize_update_latent_viterbi(
+            observations, actions, self.masks, student)
         transcurrido = time.perf_counter()-now
+        for i, opt in enumerate(opts):
+            self.options[i][:len(opt)] = torch.from_numpy(opt.squeeze(1))
+        self.tensors = (observations, actions, masks, self.options, gt_opts)
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
 
 
@@ -113,49 +119,28 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             traj_num
             ):
         observations, actions, masks, _, gt_opts = self.tensors
-        obs = observations[traj_num][masks[traj_num].to(bool)]
-        acts = actions[traj_num][masks[traj_num].to(bool)]
+        obs = observations[traj_num].unsqueeze(0)
+        acts = actions[traj_num].unsqueeze(0)
         opts = update_latent_viterbi(
-            states=np.array(obs),
+            states=obs,
             actions=acts,
-            traj_num=traj_num,
+            masks=self.masks[traj_num].unsqueeze(0),
             student=student,
-            option_dim=7)
+            option_dim=7)[0]
         self.options[traj_num][:len(obs)] = torch.from_numpy(opts.squeeze(1))
         self.tensors = (observations, actions, masks, self.options, gt_opts)
     
-    def get_entropy(self, student, save=True):
+    def get_probs(self, student, save=True):
         print("Estimating entropies. Please wait...")
         now = time.perf_counter()
-        entropies = []
-        for traj_num in range(len(self)):
-            entropies.append(
-                self.get_entropy_of_traj(student, traj_num)
-            )
+        observations, actions, _, _, _ = self.tensors
+        probs = paralellize_prob_latent(observations, actions, self.masks, student)
         transcurrido = time.perf_counter()-now
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
-
         if save:
-            self.entropies=entropies
-        return entropies
+            self.latent_probs=probs
+        return probs
 
-    def get_entropy_of_traj(
-            self,
-            student,
-            traj_num):
-        observations, actions, masks, _, _ = self.tensors
-        obs = observations[traj_num][masks[traj_num].to(bool)]
-        acts = actions[traj_num][masks[traj_num].to(bool)]
-        def entropy(tensor):
-            return -(tensor * torch.log(tensor)).nansum(1)
-        probs = prob_latent(
-            states=np.array(obs),
-            actions=acts,
-            traj_num=traj_num,
-            student=student,
-            option_dim=7)
-        return entropy(torch.from_numpy(probs))
-    
     def _calculate_gt_options(self, observations):
         true_options = []
         for episode in observations:

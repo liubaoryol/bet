@@ -193,6 +193,7 @@ class Workspace:
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
+                import pdb; pdb.set_trace()
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
                 _, loss, loss_components = self.state_prior.get_latent_and_loss(
                     obs_rep=(enc_obs, option),
