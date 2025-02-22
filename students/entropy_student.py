@@ -14,17 +14,23 @@ class Latent_entropy_based(CuriousPupil):
     single_query_only: bool = False
 
     def query_oracle(self, oracle, num_queries=1):
+        """Randomly selects a trajectory and a timestep
+        Logs query,, changes annotated options
+        returns changed trajectories
+        """
         if self.annotated_options is None:
             self.annotated_options = np.ones(oracle.true_options.shape)
             self.annotated_options[:] = None
         changed_trjs = set()
-        if not getattr(self.dataset, 'entropies', False):
-            print("Entropies not estimated before hand.")
-            self.dataset.get_entropy(self)
-
+        if not getattr(self.dataset, 'latent_probs', False):
+            print("latent probs not estimated before hand.")
+            probs = self.dataset.get_probs(self)
+        else:
+            probs = self.dataset.latent_probs
+        entropies = [self._entropy(prob) for prob in probs]
         shape = oracle.true_options.shape
         entropies_arr = np.zeros(shape)
-        for traj_num, entr in enumerate(self.dataset.entropies):
+        for traj_num, entr in enumerate(entropies):
             entropies_arr[traj_num][:len(entr)] = entr
         argss = np.argpartition(entropies_arr.reshape(-1), -num_queries)[-num_queries:]
         argss = entropies_arr.reshape(-1)[argss]
@@ -36,7 +42,9 @@ class Latent_entropy_based(CuriousPupil):
             traj_num, idx_query)
             changed_trjs.add(traj_num)
         return changed_trjs
-
+        
+    def _entropy(self, array):
+        return np.nansum(-array * np.log(array), 1)
 
 @dataclasses.dataclass
 class ActionEntropyBased(CuriousPupil):

@@ -11,6 +11,10 @@ class Iterativerandom(CuriousPupil):
     single_query_only: bool = False
 
     def query_oracle(self, oracle, num_queries=1):
+        """Randomly selects a trajectory and a timestep
+        Logs query,, changes annotated options
+        returns changed trajectories
+        """
         if self.annotated_options is None:
             self.annotated_options = np.ones(oracle.true_options.shape)
             self.annotated_options[:] = None

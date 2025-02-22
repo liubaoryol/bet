@@ -117,7 +117,10 @@ class CuriousPupil(ABC):
             self.list_queries[traj_num] = set()
         self.list_queries[traj_num].add(idx_query)
         # self.list_queries[traj_num].add(QueryIdentifier(traj_num, idx_query))
-
+    
+    def pop_query(self, traj_num, idx_query):
+        self.list_queries[traj_num].remove(idx_query)
+        self.annotated_options[traj_num][idx_query] = None
     def __str__(self):
         return f'Student(num_demos={len(self.demos)}, option_dim={self.option_dim})'
 
