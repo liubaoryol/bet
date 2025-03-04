@@ -5,7 +5,7 @@ from dataloaders.latent_estimation.fb_algorithm_latent import (
     clean_backward_msg,
     single_update_latent_viterbi)
 from dataloaders.latent_estimation.log_probs import aux_probs
-
+import torch
 
 def single_prob_latent(args):
     """Get P(X|traj) of a single trajectory
@@ -48,18 +48,24 @@ def paralellize_prob_latent(
         student=None,
         option_dim=7):
 
-    log_acts_full, log_opts_full = aux_probs(
-        states,
-        actions,
-        student.state_prior,
-        student.action_ae,
-        option_dim
-        )
+    log_acts_full, log_opts_full = [], []
+    for sl in [slice(0, 200), slice(200, 400), slice(400, None)]:
+        log_acts, log_opts = aux_probs(
+            states[sl],
+            actions[sl],
+            student.state_prior,
+            student.action_ae,
+            option_dim
+            )
+        log_acts_full.append(log_acts)
+        log_opts_full.append(log_opts)
+    log_opts_full = torch.concatenate(log_opts_full)
+    log_acts_full = torch.concatenate(log_acts_full)
     log_acts_full = log_acts_full.to('cpu').numpy()
     log_opts_full = log_opts_full.to('cpu').numpy()
 
     Ns = []
-    for i, mm in enumerate(masks):
+    for i, mm in enumerate(masks.to('cpu').numpy()):
         finished = np.where(mm==0)[0]
         if len(finished)>0:
             Ns.append(finished[0].item())
@@ -87,19 +93,24 @@ def paralellize_update_latent_viterbi(
         masks,
         student=None,
         option_dim=7,):
-
-    log_acts_full, log_opts_full = aux_probs(
-        states,
-        actions,
-        student.state_prior,
-        student.action_ae,
-        option_dim
-        )
+    log_acts_full, log_opts_full = [], []
+    for sl in [slice(0, 200), slice(200, 400), slice(400, None)]:
+        log_acts, log_opts = aux_probs(
+            states[sl],
+            actions[sl],
+            student.state_prior,
+            student.action_ae,
+            option_dim
+            )
+        log_acts_full.append(log_acts)
+        log_opts_full.append(log_opts)
+    log_opts_full = torch.concatenate(log_opts_full)
+    log_acts_full = torch.concatenate(log_acts_full)
     log_acts_full = log_acts_full.to('cpu').numpy()
     log_opts_full = log_opts_full.to('cpu').numpy()
 
     Ns = []
-    for i, mm in enumerate(masks):
+    for i, mm in enumerate(masks.to('cpu').numpy()):
         finished = np.where(mm==0)[0]
         if len(finished)>0:
             Ns.append(finished[0].item())

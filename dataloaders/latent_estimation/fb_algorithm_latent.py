@@ -198,7 +198,7 @@ def prob_latent(
     log_opts_full = log_opts_full.to('cpu').numpy()
 
     Ns = []
-    for i, mm in enumerate(masks):
+    for i, mm in enumerate(masks.cpu().numpy()):
         finished = np.where(mm==0)[0]
         if len(finished)>0:
             Ns.append(finished[0].item())
@@ -248,7 +248,7 @@ def update_latent_viterbi(
     log_acts_full = log_acts_full.to('cpu').numpy()
     log_opts_full = log_opts_full.to('cpu').numpy()
     Ns = []
-    for i, mm in enumerate(masks):
+    for i, mm in enumerate(masks.cpu().numpy()):
         finished = np.where(mm==0)[0]
         if len(finished)>0:
             Ns.append(finished[0].item())

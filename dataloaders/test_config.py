@@ -62,6 +62,27 @@ cfg = {
             'carla_multipath_town04_merge': '/path/to/datasets/carla_dataset', 
             'relay_kitchen': '/home/liubove/Documents/my-packages/bet/bet_data_release/kitchen/', 
             'multimodal_push_fixed_target': '/path/to/datasets/block_push_dataset'})
-            })
-            }
+            }),
+    'env': AttrDict({
+        'name': 'kitchen-all-v0',
+        'args': [],
+        'kw_init_option_modelargs': {},
+        'obs_dim': 60,
+        'action_dim': 9,
+        'action_min': None,
+        'action_max': None,
+        'load_dir': "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.15/183029_kitchen_train",
+        'workspace': AttrDict({
+            '_target_': 'workspaces.adept_kitchen.AdeptKitchenWorkspace'}),
+        'dataset_fn': AttrDict({
+            '_target_': 'dataloaders.trajectory_loader.get_relay_kitchen_train_val',
+            'data_directory': "/home/liubove/Documents/my-packages/bet/bet_data_release/kitchen/",
+            'window_size': 10})
+    }),
+    'train_fraction': 0.95,
+    'batch_size': 64,
+    'num_workers': 16,
+    'window_size': 10,
+    'student_type':'random'
+    }
 cfg = AttrDict(cfg)

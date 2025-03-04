@@ -38,7 +38,7 @@ import workspaces.adept_kitchen
 from dataloaders.trajectory_loader import get_relay_kitchen_train_val
 import students as random_student
 
-
+# workspace = 
 model = workspaces.adept_kitchen.AdeptKitchenWorkspace(cfg)
 train_set, _ = get_relay_kitchen_train_val(
     data_directory=cfg.env.dataset_fn['data_directory'],

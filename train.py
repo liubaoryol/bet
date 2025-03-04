@@ -50,7 +50,7 @@ class Workspace:
         # )
         # self.train_set, self.test_set = self.dataset
 
-        self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory)
+        self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory, device=cfg.device)
         self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
 
         # Simple MLP to sample an initial option.
@@ -178,7 +178,7 @@ class Workspace:
             )
             for data in pbar:
                 number +=1
-                self.train_set.dataset.dataset.get_entropy(self.student)
+                # self.train_set.dataset.dataset.get_probs(self.student)
                 if not self.student.single_query_only:
                     if self.query_time:
                         trjs_changed = self.train_set.dataset.dataset.query_oracle(self.student)
@@ -193,7 +193,6 @@ class Workspace:
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
-                import pdb; pdb.set_trace()
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
                 _, loss, loss_components = self.state_prior.get_latent_and_loss(
                     obs_rep=(enc_obs, option),
@@ -281,9 +280,10 @@ class Workspace:
         if self.student.single_query_only:
             print("Querying oracle!")
             self.train_set.dataset.dataset.query_oracle(self.student)
-            self.train_set.dataset.dataset.update_options(
-                self.student)
-            
+
+        self.train_set.dataset.dataset.update_options(
+            self.student)
+        
         self.state_prior_iterator = tqdm.trange(
             self.prior_epoch, self.cfg.num_prior_epochs
         )

@@ -24,7 +24,7 @@ from students.base import Oracle
 from dataloaders.latent_estimation.parallelize_latent_estimation import (
     paralellize_prob_latent,
     paralellize_update_latent_viterbi)
-from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi
+from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi, prob_latent
 
 
 OBS_ELEMENT_INDICES = {
@@ -60,7 +60,7 @@ ALL_TASKS = [
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
                  data_directory,
-                 device="cuda"):
+                 device="cpu"):
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -69,6 +69,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         observations, actions, masks = transpose_batch_timestep(
             observations, actions, masks
         )
+        masks = torch.from_numpy(masks).to(device).float()
         self.masks = masks
         self.device = device
         # I will have three variables for holding options
@@ -84,7 +85,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         self.oracle = Oracle(true_options=gt_options)
         # observations = observations[:,:,:11]
         # TODO: Find self._gt_options and self._available_gt_options -> student.annotated_opts
-        masks = torch.from_numpy(masks).to(device).float()
+        
         self.options = torch.zeros_like(masks).int()
         super().__init__(
             torch.from_numpy(observations).to(device).float(),
@@ -105,7 +106,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         now = time.perf_counter()
         observations, actions, masks, _, gt_opts = self.tensors
         opts = paralellize_update_latent_viterbi(
-            observations, actions, self.masks, student)
+            observations.to('cuda'), actions.to('cuda'), masks.to('cuda'), student)
         transcurrido = time.perf_counter()-now
         for i, opt in enumerate(opts):
             self.options[i][:len(opt)] = torch.from_numpy(opt.squeeze(1))
@@ -122,19 +123,19 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         obs = observations[traj_num].unsqueeze(0)
         acts = actions[traj_num].unsqueeze(0)
         opts = update_latent_viterbi(
-            states=obs,
-            actions=acts,
-            masks=self.masks[traj_num].unsqueeze(0),
+            states=obs.to('cuda'),
+            actions=acts.to('cuda'),
+            masks=self.masks[traj_num].unsqueeze(0).to('cuda'),
             student=student,
             option_dim=7)[0]
-        self.options[traj_num][:len(obs)] = torch.from_numpy(opts.squeeze(1))
+        self.options[traj_num][:len(opts)] = torch.from_numpy(opts.squeeze(1))
         self.tensors = (observations, actions, masks, self.options, gt_opts)
     
     def get_probs(self, student, save=True):
         print("Estimating entropies. Please wait...")
         now = time.perf_counter()
-        observations, actions, _, _, _ = self.tensors
-        probs = paralellize_prob_latent(observations, actions, self.masks, student)
+        observations, actions, masks, _, _ = self.tensors
+        probs = paralellize_prob_latent(observations.to('cuda'), actions.to('cuda'), masks.to('cuda'), student)
         transcurrido = time.perf_counter()-now
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
         if save:
