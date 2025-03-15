@@ -42,13 +42,6 @@ class Workspace:
         self.cfg = cfg
         self.device = torch.device(cfg.device)
         utils.set_seed_everywhere(cfg.seed)
-        # self.dataset = hydra.utils.call(
-        #     cfg.env.dataset_fn,
-        #     train_fraction=cfg.train_fraction,
-        #     random_seed=cfg.seed,
-        #     device=self.device,
-        # )
-        # self.train_set, self.test_set = self.dataset
 
         self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory, device=cfg.device)
         self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
@@ -70,7 +63,7 @@ class Workspace:
         self.action_ae = None
         self.obs_encoding_net = None
         self.state_prior = None
-        # self.option_model = None
+
         if not self.cfg.lazy_init_models:
             self._init_action_ae()
             self._init_obs_encoding_net()
@@ -88,6 +81,12 @@ class Workspace:
             state_prior=self.state_prior,
             action_ae=self.action_ae,
             dataset=self.train_set.dataset.dataset)
+        if cfg.student_type=='random':
+            self.student.query_percent=cfg.randomst_query_percent
+            self.student.student_type=f'query_percent{cfg.randomst_query_percent}'
+        
+        self.num_queries = cfg.num_queries
+        self.query_freq = cfg.query_freq
 
         self.log_components = OrderedDict()
         self.epoch = self.prior_epoch = self.option_epoch = 0
@@ -169,7 +168,7 @@ class Workspace:
 
 
     def train_prior(self):
-        self.query_time = True
+        self.query_time = 0
         number = 0
         self.state_prior.train()
         with utils.eval_mode(self.obs_encoding_net, self.action_ae):
@@ -178,17 +177,17 @@ class Workspace:
             )
             for data in pbar:
                 number +=1
-                # self.train_set.dataset.dataset.get_probs(self.student)
+                self.query_time +=1
                 if not self.student.single_query_only:
-                    if self.query_time:
-                        trjs_changed = self.train_set.dataset.dataset.query_oracle(self.student)
+                    if not self.query_time%self.query_freq:
+                        trjs_changed = self.student.query_oracle(
+                            self.train_set.dataset.dataset.oracle,
+                            num_queries=self.num_queries)
                         for traj_num in trjs_changed:
                             self.train_set.dataset.dataset.update_options_of_traj(
                                 self.student,
                                 traj_num)
-                # if not number%20:
-                #     self.train_set.dataset.dataset.update_options(
-                #         self.student)
+
                 observations, action, mask, option, gt_option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
@@ -199,22 +198,26 @@ class Workspace:
                     target_latents=latent,
                     return_loss_components=True,
                 )
+                logits, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
                 loss.backward()
-                
-                _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
                 loss2.backward()
-                targets = gt_option.to(enc_obs.device)[:,1:]
-                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
-                loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
-
                 torch.nn.utils.clip_grad_norm_(
                     self.state_prior.parameters(), self.cfg.grad_norm_clip
                 )
                 self.state_prior_optimizer.step()
                 self.option_optimizer.step()
+
+                # Book keeping
+                targets = gt_option.to(enc_obs.device)[:,1:]
+                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+                loss3 = F.cross_entropy(
+                    logits.view(-1, logits.size(-1)),
+                    targets.view(-1, logits.size(-1)))
+                loss4 = (gt_option!=option).sum() / option.numel()
                 self.log_append("option_train", len(observations), {
                     'cross_entropy': loss2, 
-                    'gt_cross_entropy': loss3})
+                    'gt_cross_entropy': loss3,
+                    'fwbw_estimation': loss4})
                 self.log_append("prior_train", len(observations), loss_components)
 
     def eval_prior(self):
@@ -237,9 +240,11 @@ class Workspace:
                 targets = gt_option.to(enc_obs.device)[:,1:]
                 targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
                 loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
+                loss4 = (gt_option!=option).sum() / option.numel()
                 self.log_append("option_eval", len(observations), {
                     'cross_entropy': loss2, 
-                    'gt_cross_entropy': loss3})
+                    'gt_cross_entropy': loss3,
+                    'fwbw_estimation': loss4})
 
     def train_init_state(self, epoch):
         # Train for one epoch
@@ -281,8 +286,8 @@ class Workspace:
             print("Querying oracle!")
             self.train_set.dataset.dataset.query_oracle(self.student)
 
-        self.train_set.dataset.dataset.update_options(
-            self.student)
+        # self.train_set.dataset.dataset.update_options(
+        #     self.student)
         
         self.state_prior_iterator = tqdm.trange(
             self.prior_epoch, self.cfg.num_prior_epochs
@@ -291,8 +296,9 @@ class Workspace:
 
         for epoch in self.state_prior_iterator:
             self.prior_epoch = epoch
+            # update options every epoch
+            self.train_set.dataset.dataset.update_options(self.student) 
             self.train_prior()  # Trains prior and queries oracle
-            self.train_set.dataset.dataset.update_options(self.student)
             self.train_init_state(epoch)
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
                 self.eval_prior()

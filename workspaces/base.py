@@ -110,23 +110,27 @@ class Workspace:
         # initial option distribution has not been trained so will start with 0
         with utils.eval_mode(self.init_prob):
             option = self.init_prob(torch.Tensor(obs).to('cuda'))
-            option = torch.nn.Softmax()(option)
-        print("Initial option distribution: ", option)
-        option = torch.multinomial(option, num_samples=1).reshape(1,-1)
+            option_logs = torch.nn.Softmax()(option)
+        print("Initial option distribution: ", option_logs)
+        option = torch.multinomial(option_logs, num_samples=1).reshape(1,-1)
         o = sequence.pop(0)
         option = torch.Tensor([[o]]).to(int).to('cuda')
         self.curr_option = option
         last_obs = obs
         if self.cfg.start_from_seen:
             obs = self._start_from_known()
-        action, latents, option = self._get_action(obs, sample=True, keep_last_bins=False, option=option)
+        action, latents, (_, _) = self._get_action(obs, sample=True, keep_last_bins=False, option=option)
         # option = torch.Tensor([[o]]).to(int).to('cuda')
         done = False
         total_reward = 0
         obs_history.append(obs)
         action_history.append(action)
         latent_history.append(latents)
+
+        n_queries = 0
         for i in range(self.cfg.num_eval_steps):
+            # print(i)
+            # try:
             if self.cfg.plot_interactions:
                 self._plot_obs_and_actions(obs, action, done)
             if done:
@@ -142,23 +146,31 @@ class Workspace:
             else:
                 last_obs = obs  # cache valid observation
             keep_last_bins = ((i + 1) % self.cfg.action_update_every) != 0
-            action, latents, option = self._get_action(
+            action, latents, (option, option_logs) = self._get_action(
                 obs, sample=True, keep_last_bins=keep_last_bins, option=option
             )
             # print("Option:", option)
             if option != self.curr_option:
-                print("Option selected is: ", option)
-                if len(sequence)==0:
-                    break
-                o = sequence.pop(0)
-                print("Executing task number", o)
-                option = torch.Tensor([[o]]).to(int).to('cuda')
-                self.curr_option = option
+                if not len(sequence)==0:
+                    # raise BufferError
+                    name_option = self.env.ALL_TASKS[option.cpu().item()]
+                    print("Algorithm selected ", name_option, "with probability", option_logs)
+                    o = sequence.pop(0)
+                    print("Executing task number", o)
+                    option = torch.Tensor([[o]]).to(int).to('cuda')
+                    self.curr_option = option
             obs_history.append(obs)
             action_history.append(action)
             latent_history.append(latents)
+            # except KeyboardInterrupt:
+            #     import pdb; pdb.set_trace()
+            # except BufferError:
+            #     print("BufferError")
+            #     import pdb; pdb.set_trace()
         logging.info(f"Total reward: {total_reward}")
         logging.info(f"Final info: {info}")
+        logging.info(f"Number of queries: {n_queries}")
+        print("Number of queries", n_queries)
         return total_reward, obs_history, action_history, latent_history, info
 
     def _report_result_upon_completion(self):
@@ -190,7 +202,7 @@ class Workspace:
                 except:
                     import pdb; pdb.set_trace()
                 # Sample latents from the prior
-                latents, option = self.state_prior.generate_latents(
+                latents, (option, option_logs) = self.state_prior.generate_latents(
                     enc_obs_seq,
                     torch.ones_like(enc_obs_seq).mean(dim=-1),
                     option=option
@@ -239,7 +251,7 @@ class Workspace:
                 actions = einops.rearrange(
                     actions, "batch 1 action_dim -> batch action_dim"
                 )
-            return actions, (logits_to_save, offsets_to_save, action_latents), option
+            return actions, (logits_to_save, offsets_to_save, action_latents), (option, option_logs)
 
     def run(self):
         rewards = []

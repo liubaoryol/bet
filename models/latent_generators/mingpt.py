@@ -167,7 +167,8 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         else:
             logits = output
         next_option = F.softmax(self.option_model((obs_rep, option))[0], -1)
-        next_option = torch.multinomial(next_option.view(-1, next_option.shape[-1]), num_samples=1)
+        next_option_logs = next_option.view(-1, next_option.shape[-1])
+        next_option = torch.multinomial(next_option_logs, num_samples=1)
         probs = F.softmax(logits, dim=-1)
         batch, seq, choices = probs.shape
         # Sample from the multinomial distribution, one per row.
@@ -175,14 +176,15 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         sampled_data = einops.rearrange(
             sampled_data, "(batch seq) 1 -> batch seq 1", batch=batch, seq=seq
         )
+        next_option = next_option[-1].unsqueeze(0)
         if self.predict_offsets:
             sampled_offsets = offsets[
                 torch.arange(offsets.shape[0]), sampled_data.flatten()
             ].view(batch, seq, self.action_dim)
 
-            return (sampled_data, sampled_offsets), next_option[-1].unsqueeze(0)
+            return (sampled_data, sampled_offsets), (next_option, next_option_logs[-1][next_option].item())
         else:
-            return sampled_data, next_option[-1].unsqueeze(0)
+            return sampled_data, (next_option, next_option_logs[-1][next_option].item())
 
     def get_optimizer(
         self, weight_decay: float, learning_rate: float, betas: Tuple[float, float]

@@ -81,7 +81,7 @@ def paralellize_prob_latent(
         student.list_queries,
         student.annotated_options
         ) for traj_num, prob_acts, prob_opts, last_step in iter_data]
-
+    
     with mp.Pool() as pool:
         res = pool.map(single_prob_latent, iter_data)
     return res
@@ -129,4 +129,5 @@ def paralellize_update_latent_viterbi(
 
     with mp.Pool() as pool:
         res = pool.map(single_update_latent_viterbi, iter_data)
+    
     return res

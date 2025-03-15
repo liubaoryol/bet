@@ -50,7 +50,8 @@ def single_update_latent_viterbi(args):
                 #     student,
                 #     j_value=int(student.annotated_options[traj_num][h]))
                 log_prob = log_prob[None]
-                log_prob = np.log(log_prob)
+
+                log_prob = np.log(log_prob+1e-10)
                 # if i+1 in known_idxs:
                 #     log_prob = -torch.inf * torch.ones((1, option_dim, option_dim), device=device)
                 #     log_prob[:,:,int(student.annotated_options[traj_num][i+1])] = 0
@@ -177,6 +178,8 @@ def clean_backward_msg(
         # if res.sum()==0:
         #     import pdb; pdb.set_trace()
         res = res/sum(res)
+        if np.isnan(res).any():
+            import pdb; pdb.set_trace()
         backward_array.insert(0, res)
     return np.array(backward_array)
 

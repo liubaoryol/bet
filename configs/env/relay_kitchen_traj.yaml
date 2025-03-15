@@ -7,21 +7,19 @@ action_min: null
 action_max: null
 
 # BeT baseline
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/105443_kitchen_train"
-# BeT with zero option but skip connection
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2024.10.15/142452_kitchen_train"
-# Hierarchical BeT
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.02/150340_kitchen_train"
-# Supervised
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.15/183003_kitchen_train"
-# Unsupervised
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.15/183029_kitchen_train"
-# Random 20% updates every epoch
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.17/105933_kitchen_train"
-# Random 20% didn't update at any point.
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.15/182943_kitchen_train"
+# Sup
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/182407_kitchen_train"
+# Uns
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/182413_kitchen_train"
+# 20 percent
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/182403_kitchen_train"
+# 10 percent
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/193118_kitchen_train"
+
 # Iterative random
-# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.02.17/113116_kitchen_train" 
+# load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/214558_kitchen_train"
+# Entropy
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.11/105903_kitchen_train"
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
 

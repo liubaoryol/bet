@@ -16,6 +16,9 @@ window_size: 10
 
 # Supervision parameters
 student_type: latent_entropy_based # latent_entropy_based, unsupervised, IterativeRandom, QueryCapLimit, Random
+query_freq: 3
+num_queries: 1 # number of queries per access to oracle
+randomst_query_percent: 0.2
 
 # Training details
 num_training_epochs: 1
@@ -42,7 +45,7 @@ eval_every: 1
 save_every: 1
 
 # Wandb config
-project: behavior_transformer_students
+project: new_experiments_students
 experiment: kitchen_train
 
 hydra:

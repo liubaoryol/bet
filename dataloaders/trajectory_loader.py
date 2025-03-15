@@ -23,7 +23,8 @@ import gym
 from students.base import Oracle
 from dataloaders.latent_estimation.parallelize_latent_estimation import (
     paralellize_prob_latent,
-    paralellize_update_latent_viterbi)
+    paralellize_update_latent_viterbi,
+    single_prob_latent)
 from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi, prob_latent
 
 
@@ -60,7 +61,8 @@ ALL_TASKS = [
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
                  data_directory,
-                 device="cpu"):
+                 device="cpu",
+                 obs_shape=60):
         data_directory = Path(data_directory)
         observations = np.load(data_directory / "observations_seq.npy")
         actions = np.load(data_directory / "actions_seq.npy")
@@ -83,7 +85,7 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         # available_opts
         gt_options = self._calculate_gt_options(observations)
         self.oracle = Oracle(true_options=gt_options)
-        # observations = observations[:,:,:11]
+        observations = observations[:,:,:obs_shape]
         # TODO: Find self._gt_options and self._available_gt_options -> student.annotated_opts
         
         self.options = torch.zeros_like(masks).int()
@@ -102,17 +104,13 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         return student.query_oracle(self.oracle, num_queries)
 
     def update_options(self, student):
-        print("Estimating options for all trajectories. Please wait...")
-        now = time.perf_counter()
-        observations, actions, masks, _, gt_opts = self.tensors
-        opts = paralellize_update_latent_viterbi(
-            observations.to('cuda'), actions.to('cuda'), masks.to('cuda'), student)
-        transcurrido = time.perf_counter()-now
+        opts = self.get_probs(student)
+        self.latent_probs = opts
         for i, opt in enumerate(opts):
-            self.options[i][:len(opt)] = torch.from_numpy(opt.squeeze(1))
-        self.tensors = (observations, actions, masks, self.options, gt_opts)
-        print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
-
+            opt = torch.multinomial(torch.from_numpy(opt), 1)
+            self.options[i][:len(opt)] = opt.squeeze(1)
+        obs, acts, masks, _, gt_opts = self.tensors
+        self.tensors = (obs, acts, masks, self.options, gt_opts)
 
     def update_options_of_traj(
             self,
@@ -122,20 +120,41 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         observations, actions, masks, _, gt_opts = self.tensors
         obs = observations[traj_num].unsqueeze(0)
         acts = actions[traj_num].unsqueeze(0)
-        opts = update_latent_viterbi(
-            states=obs.to('cuda'),
-            actions=acts.to('cuda'),
-            masks=self.masks[traj_num].unsqueeze(0).to('cuda'),
-            student=student,
-            option_dim=7)[0]
-        self.options[traj_num][:len(opts)] = torch.from_numpy(opts.squeeze(1))
-        self.tensors = (observations, actions, masks, self.options, gt_opts)
-    
+        from dataloaders.latent_estimation.log_probs import aux_probs
+        prob_acts, prob_opts = aux_probs(
+            obs.to('cuda'),
+            acts.to('cuda'),
+            student.state_prior,
+            student.action_ae,
+            option_dim=7
+            )
+        last_step = np.where(self.masks[traj_num]==0)[0]
+        if len(last_step)>0:
+            last_step=last_step[0].item()
+        else:
+            last_step=len(obs[0])
+        args= (traj_num,
+                    prob_acts[0].cpu().numpy(),
+                    prob_opts[0].cpu().numpy(),
+                    last_step,
+                    student.list_queries,
+                    student.annotated_options)
+        self.latent_probs[traj_num] = single_prob_latent(args)
+        opts = self.latent_probs[traj_num]
+        try:
+            opts = torch.multinomial(torch.from_numpy(opts), 1)
+        except:
+            import pdb; pdb.set_trace()
+        self.options[traj_num][:len(opts)] = opts.squeeze(1)
+
     def get_probs(self, student, save=True):
-        print("Estimating entropies. Please wait...")
+        print("Estimating probs for all traj latents. Please wait...")
         now = time.perf_counter()
         observations, actions, masks, _, _ = self.tensors
-        probs = paralellize_prob_latent(observations.to('cuda'), actions.to('cuda'), masks.to('cuda'), student)
+        probs = paralellize_prob_latent(observations.to('cuda'),
+                                        actions.to('cuda'),
+                                        masks.to('cuda'),
+                                        student)
         transcurrido = time.perf_counter()-now
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
         if save:

@@ -30,11 +30,13 @@ class Latent_entropy_based(CuriousPupil):
         entropies = [self._entropy(prob) for prob in probs]
         shape = oracle.true_options.shape
         entropies_arr = np.zeros(shape)
+        # import pdb; pdb.set_trace()
         for traj_num, entr in enumerate(entropies):
             entropies_arr[traj_num][:len(entr)] = entr
         argss = np.argpartition(entropies_arr.reshape(-1), -num_queries)[-num_queries:]
         argss = entropies_arr.reshape(-1)[argss]
         idxs = np.in1d(entropies_arr, argss).reshape(entropies_arr.shape)
+        # import pdb; pdb.set_trace()
         traj_nums, idx_queries = np.where(idxs)
         for traj_num, idx_query in zip(traj_nums, idx_queries):
             self.log_query(traj_num, idx_query)

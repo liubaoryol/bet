@@ -5,7 +5,7 @@ import torch
 
 
 @torch.no_grad()
-def prob_action(observations, actions=None, policy=None, option_dim=7):
+def prob_action(observations, actions=None, policy=None, option_dim=7, vocab_size=64):
     """
     Return probability P(a|s, o) N x option_dim
 
@@ -26,6 +26,7 @@ def prob_action(observations, actions=None, policy=None, option_dim=7):
     for o in range(option_dim):
         opts = torch.ones([B*H, 1], dtype=int, device=device) * o
         logits, _ = policy((states, opts))
+        logits = logits[:,:,:vocab_size]
         logits = torch.nn.Softmax(2)(logits)
         logits = logits[range(B*H), 0, acts]
         results.append(logits)
@@ -76,6 +77,7 @@ def aux_probs(
     log_acts_full = prob_action(states,
                             acts,
                             option_dim=option_dim,
-                            policy=policy
+                            policy=policy,
+                            vocab_size=state_prior.vocab_size
                             )
     return log_acts_full, log_opts_full
