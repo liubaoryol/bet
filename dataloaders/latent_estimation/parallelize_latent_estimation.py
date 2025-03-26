@@ -19,7 +19,8 @@ def single_prob_latent(args):
      prob_opts,
      last_step,
      list_queries,
-     annotated_options) = args
+     annotated_options,
+     option_dim) = args
 
     fw = clean_forward_msg(
         prob_acts,
@@ -27,7 +28,8 @@ def single_prob_latent(args):
         last_step,
         traj_num,
         list_queries,
-        annotated_options)[1:]
+        annotated_options,
+        option_dim=option_dim)[1:]
 
     bw = clean_backward_msg(
         prob_acts,
@@ -35,7 +37,8 @@ def single_prob_latent(args):
         last_step,
         traj_num,
         list_queries,
-        annotated_options)[1:]
+        annotated_options,
+        option_dim=option_dim)[1:]
     res = np.nan_to_num(fw*bw)
     res = res / res.sum(1)[...,np.newaxis]
     return res
@@ -79,7 +82,8 @@ def paralellize_prob_latent(
         prob_opts,
         last_step, 
         student.list_queries,
-        student.annotated_options
+        student.annotated_options,
+        option_dim
         ) for traj_num, prob_acts, prob_opts, last_step in iter_data]
     
     with mp.Pool() as pool:

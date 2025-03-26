@@ -3,6 +3,7 @@ args: []
 kw_init_option_modelargs: {}
 obs_dim: 60
 action_dim: 9
+latent_dim: 7
 action_min: null
 action_max: null
 
@@ -19,7 +20,7 @@ action_max: null
 # Iterative random
 # load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/214558_kitchen_train"
 # Entropy
-load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.11/105903_kitchen_train"
+load_dir: "/home/liubove/Documents/my-packages/bet/exp_local/2025.03.10/182407_kitchen_train"
 workspace:
   _target_: workspaces.adept_kitchen.AdeptKitchenWorkspace
 

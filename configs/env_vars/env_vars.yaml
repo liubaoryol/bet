@@ -2,3 +2,4 @@ datasets:
   carla_multipath_town04_merge: /path/to/datasets/carla_dataset
   relay_kitchen: /home/liubove/Documents/my-packages/bet/bet_data_release/kitchen/
   multimodal_push_fixed_target: /path/to/datasets/block_push_dataset
+  libero_goal: /home/liubove/Documents/my-packages/LIBERO/libero/datasets

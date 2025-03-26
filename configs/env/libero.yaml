@@ -1,0 +1,20 @@
+name: libero-goal-v0
+args: []
+kw_init_option_modelargs: {}
+obs_dim: 9
+action_dim: 7
+latent_dim: 10
+action_min: null
+action_max: null
+# BeT baseline
+# Supervised
+# load_dir: /home/liubove/Documents/my-packages/bet/exp_local/2025.03.21/161211_libero_train
+# Unsupervised
+load_dir: /tmp
+workspace:
+  _target_: workspaces.libero_exec.LiberoWorkspace
+
+dataset_fn:
+  _target_: dataloaders.trajectory_loader.get_libero_train_val
+  data_directory: /home/liubove/Documents/my-packages/LIBERO/libero/datasets
+  window_size: ${window_size}

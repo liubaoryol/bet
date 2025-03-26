@@ -72,8 +72,7 @@ def aux_probs(
     policy.eval()
 
     acts = action_ae.encode_into_latent(actions.to(device).contiguous())[0]
-
-    log_opts_full = prob_option(states, option_model)
+    log_opts_full = prob_option(states, option_model, option_dim=option_dim)
     log_acts_full = prob_action(states,
                             acts,
                             option_dim=option_dim,

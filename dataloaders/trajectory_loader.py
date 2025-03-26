@@ -27,6 +27,9 @@ from dataloaders.latent_estimation.parallelize_latent_estimation import (
     single_prob_latent)
 from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi, prob_latent
 
+from robomimic.utils.dataset import SequenceDataset
+from torch.utils.data import ConcatDataset
+from libero.libero.benchmark import BENCHMARK_MAPPING
 
 OBS_ELEMENT_INDICES = {
     "bottom burner": np.array([11, 12]),
@@ -60,7 +63,7 @@ ALL_TASKS = [
 
 class RelayKitchenTrajectoryDataset(TensorDataset):
     def __init__(self,
-                 data_directory,
+                 data_directory='/home/liubove/Documents/my-packages/bet/bet_data_release/kitchen/',
                  device="cpu",
                  obs_shape=60):
         data_directory = Path(data_directory)
@@ -138,7 +141,8 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
                     prob_opts[0].cpu().numpy(),
                     last_step,
                     student.list_queries,
-                    student.annotated_options)
+                    student.annotated_options,
+                    7)
         self.latent_probs[traj_num] = single_prob_latent(args)
         opts = self.latent_probs[traj_num]
         try:
@@ -155,6 +159,205 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
                                         actions.to('cuda'),
                                         masks.to('cuda'),
                                         student)
+        transcurrido = time.perf_counter()-now
+        print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
+        if save:
+            self.latent_probs=probs
+        return probs
+
+    def _calculate_gt_options(self, observations):
+        true_options = []
+        for episode in observations:
+            args = []
+            for GOAL in ALL_TASKS:
+                obj_state = episode[:, OBS_ELEMENT_INDICES[GOAL]]
+                obj_goal = OBS_ELEMENT_GOALS[GOAL]
+                arg = np.ceil(np.linalg.norm(obj_state - obj_goal, axis=1)*100).argmin()
+                args.append(arg)
+
+            opts = np.zeros(len(episode), int)
+            sorted_args = np.argsort(args)
+            opts[:args[sorted_args[0]]] = sorted_args[0]
+            for idx, (arg1, arg2) in enumerate(zip(sorted_args[:-1], sorted_args[1:])):
+                opts[args[arg1]:args[arg2]] = arg2
+            # opts[args[arg2]:] = idx+1
+
+            true_options.append(opts)
+
+        return np.stack(true_options)
+    
+    def get_seq_length(self, idx):
+        return int(self.masks[idx].sum().item())
+
+    def get_all_actions(self):
+        result = []
+        # mask out invalid actions
+        for i in range(len(self.masks)):
+            T = int(self.masks[i].sum())
+            result.append(self.actions[i, :T, :])
+        return torch.cat(result, dim=0)
+
+
+class LiberoTrajectoryDataset(TensorDataset):
+    def __init__(self,
+                 data_directory='/home/liubove/Documents/my-packages/LIBERO/libero/datasets',
+                 device="cpu"):
+
+        benchmark_instance = BENCHMARK_MAPPING['libero_goal'](task_order_index=0)
+        observations = []
+        actions = []
+        masks = []
+        from libero.lifelong.datasets import get_dataset
+        gt_options = []
+
+        modality = {
+            'rgb': [], #["agentview_rgb", "eye_in_hand_rgb"],
+            'depth': [],
+            'low_dim': ["gripper_states", "joint_states"]
+        }
+        for i in range(10):
+            import robomimic.utils.obs_utils as ObsUtils
+            ObsUtils.initialize_obs_utils_with_obs_specs({"obs": modality})
+            
+            dataset_path = os.path.join(data_directory, benchmark_instance.get_task_demonstration(i))
+
+            dataset = SequenceDataset(
+                hdf5_path=dataset_path,
+                obs_keys=["gripper_states", "joint_states"],
+                dataset_keys=["actions", "dones"],
+                load_next_obs=False,
+                frame_stack=1,
+                seq_length=1,  # length-10 temporal sequences
+                pad_frame_stack=True,
+                pad_seq_length=True,  # pad last obs per trajectory to ensure all sequences are sampled
+                get_pad_mask=False,
+                goal_mode=None,
+                hdf5_cache_mode='low_dim',  # cache dataset in memory to avoid repeated file i/o
+                hdf5_use_swmr=False,
+                hdf5_normalize_obs=None,
+            )
+            obs, acts, mask, gt_opts = self.extract_data(dataset, subtask=i,obs_dim = 9, act_dim=7)
+            observations.append(obs)
+            actions.append(acts)
+            masks.append(mask)
+            gt_options.append(gt_opts)
+            
+        observations = np.vstack(observations)
+        actions = np.vstack(actions)
+        masks = np.vstack(masks)
+        gt_options = np.vstack(gt_options)
+
+
+        masks = torch.from_numpy(masks).to(device).float()
+        self.masks = masks
+        self.device = device
+        self.oracle = Oracle(true_options=gt_options)
+        
+        self.options = torch.zeros_like(masks).int()
+        super().__init__(
+            torch.from_numpy(observations).to(device).float(),
+            torch.from_numpy(actions).to(device).float(),
+            masks,
+            self.options,
+            torch.from_numpy(gt_options).to(device).int()
+
+        )
+        # self.visualize()
+        self.actions = self.tensors[1]
+
+    def extract_data(self, 
+                     dataset,
+                     horizon = 400,
+                     subtask=0,
+                     obs_dim=None,
+                     act_dim=None):
+            
+            n_demos = dataset.n_demos
+
+            observations = np.zeros((n_demos, horizon, obs_dim))
+            actions = np.zeros((n_demos, horizon, act_dim))
+            masks = np.zeros((n_demos, horizon))
+            gt_options = np.ones((n_demos, horizon)) * subtask
+            
+            curr_demo = 0
+            prev_steps = 0
+            for idx in range(len(dataset)):
+                data = dataset[idx]
+                observations[curr_demo][idx-prev_steps] = np.concatenate((data['obs']['gripper_states'], data['obs']['joint_states']),axis=1)
+                # observations[curr_demo][idx-prev_steps] = data['states']
+                actions[curr_demo][idx-prev_steps] = data['actions']
+                masks[curr_demo][idx-prev_steps] = 1
+                if data['dones']==1:
+                    curr_demo +=1
+                    prev_steps = idx+1
+            
+            return observations, actions, masks, gt_options
+
+    def get_stats(self):
+        stats = {t:0 for t in range(10)}
+        for data in self:
+            state_action_pairs = data[2].sum()
+            t = data[4][0].item()
+            stats[t] += state_action_pairs
+        print(stats)
+
+    def query_oracle(self, student, num_queries=1):
+        return student.query_oracle(self.oracle, num_queries)
+
+    def update_options(self, student):
+        opts = self.get_probs(student)
+        self.latent_probs = opts
+        for i, opt in enumerate(opts):
+            opt = torch.multinomial(torch.from_numpy(opt), 1)
+            self.options[i][:len(opt)] = opt.squeeze(1)
+        obs, acts, masks, _, gt_opts = self.tensors
+        self.tensors = (obs, acts, masks, self.options, gt_opts)
+
+    def update_options_of_traj(
+            self,
+            student,
+            traj_num
+            ):
+        observations, actions, masks, _, gt_opts = self.tensors
+        obs = observations[traj_num].unsqueeze(0)
+        acts = actions[traj_num].unsqueeze(0)
+        from dataloaders.latent_estimation.log_probs import aux_probs
+        prob_acts, prob_opts = aux_probs(
+            obs.to('cuda'),
+            acts.to('cuda'),
+            student.state_prior,
+            student.action_ae,
+            option_dim=10
+            )
+        last_step = np.where(self.masks[traj_num]==0)[0]
+        if len(last_step)>0:
+            last_step=last_step[0].item()
+        else:
+            last_step=len(obs[0])
+        args= (traj_num,
+                    prob_acts[0].cpu().numpy(),
+                    prob_opts[0].cpu().numpy(),
+                    last_step,
+                    student.list_queries,
+                    student.annotated_options,
+                    10)
+        self.latent_probs[traj_num] = single_prob_latent(args)
+        opts = self.latent_probs[traj_num]
+        try:
+            opts = torch.multinomial(torch.from_numpy(opts), 1)
+        except:
+            import pdb; pdb.set_trace()
+        self.options[traj_num][:len(opts)] = opts.squeeze(1)
+
+    def get_probs(self, student, save=True):
+        print("Estimating probs for all traj latents. Please wait...")
+        now = time.perf_counter()
+        observations, actions, masks, _, _ = self.tensors
+        probs = paralellize_prob_latent(observations.to('cuda'),
+                                        actions.to('cuda'),
+                                        masks.to('cuda'),
+                                        student,
+                                        option_dim=10)
         transcurrido = time.perf_counter()-now
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
         if save:
@@ -585,6 +788,23 @@ def get_relay_kitchen_train_val(
         random_seed=random_seed,
     )
     # Convert to trajectory slices.
+    train_trajectories = TrajectorySlicerSubset(train_set, window=window_size)
+    val_trajectories = TrajectorySlicerSubset(val_set, window=window_size)
+    return train_trajectories, val_trajectories
+
+def get_libero_train_val(
+        data_directory,
+        train_fraction=0.9,
+        random_seed=42,
+        device="cpu",
+        window_size=10
+):
+    dataset_full = LiberoTrajectoryDataset(data_directory)
+    train_set, val_set = split_datasets(
+        dataset_full,
+        train_fraction=train_fraction,
+        random_seed=random_seed,
+    )
     train_trajectories = TrajectorySlicerSubset(train_set, window=window_size)
     val_trajectories = TrajectorySlicerSubset(val_set, window=window_size)
     return train_trajectories, val_trajectories

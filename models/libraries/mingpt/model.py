@@ -128,9 +128,10 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """the full GPT language model, with a context size of block_size"""
 
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config: GPTConfig, num_options=7):
         super().__init__()
-        self.option_embedding = torch.nn.Embedding(7, 60)
+        self.num_options = num_options
+        self.option_embedding = torch.nn.Embedding(num_options, config.input_size)
         # input embedding stem
         self.tok_emb = nn.Linear(config.input_size*2, config.n_embd)
         self.discrete_input = config.discrete_input
@@ -140,7 +141,7 @@ class GPT(nn.Module):
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         # decoder head
         self.ln_f = nn.LayerNorm(config.n_embd)
-        self.head = nn.Linear(config.n_embd, 7, bias=False)
+        self.head = nn.Linear(config.n_embd, num_options, bias=False)
         # self.act = nn.Softmax(-1)
         self.block_size = config.block_size
         self.apply(self._init_weights)
@@ -246,7 +247,7 @@ class GPT(nn.Module):
         loss = None
         if targets is not None:
             targets = targets.to(enc_obs.device)
-            targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+            targets = F.one_hot(targets.to(torch.int64), num_classes=self.num_options).to(torch.float)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1, logits.size(-1)))
 
         return logits, loss

@@ -128,9 +128,9 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """the full GPT language model, with a context size of block_size"""
 
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config: GPTConfig, num_options=7):
         super().__init__()
-        self.option_embedding = torch.nn.Embedding(7, 60)
+        self.option_embedding = torch.nn.Embedding(num_options, config.input_size)
         self.make_goal_model(config)
         self.make_policy(config)
         self.apply(self._init_weights)

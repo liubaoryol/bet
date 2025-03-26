@@ -19,21 +19,26 @@ from students.base import Oracle
 import students
 import utils
 import wandb
+from torch.utils.data import TensorDataset, Dataset
 
 
 timestamp = lambda: datetime.now().strftime('-%m-%d_%H-%M')
 
-class minorCustomData(RelayKitchenTrajectoryDataset):
-    def __init__(self,  data_directory, device="cpu"):
-        super().__init__(data_directory, device)
-    
+class InitialStateData(Dataset):
+    def __init__(self, dataset, option_dim):
+        self.dataset = dataset
+        self.option_dim = option_dim
+        super().__init__()
     def __getitem__(self, idx):
-        item = super().__getitem__(idx)
+        item = self.dataset[idx]
         return (item[0][0],
                 item[1][0],
                 item[2][0],
-                torch.nn.functional.one_hot(item[3][0].to(torch.long), num_classes = 7)
+                torch.nn.functional.one_hot(item[3][0].to(torch.long), num_classes = self.option_dim)
         )
+    def __len__(self):
+        return int(self.dataset.masks.size(0))
+
 
 class Workspace:
     def __init__(self, cfg):
@@ -41,21 +46,10 @@ class Workspace:
         print("Saving to {}".format(self.work_dir))
         self.cfg = cfg
         self.device = torch.device(cfg.device)
+        self.num_options = cfg.env.latent_dim
+
         utils.set_seed_everywhere(cfg.seed)
-
-        self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory, device=cfg.device)
-        self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
-
-        # Simple MLP to sample an initial option.
-        self.init_prob = torch.nn.Sequential(
-            torch.nn.Linear(self.init_data[0][0].size(0), self.init_data[0][0].size(0)//2),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.init_data[0][0].size(0)//2, 7),
-        ).to(self.device)
-        self.init_optimizer = torch.optim.Adam(
-            self.init_prob.parameters()
-            )
-        self.init_criterion = torch.nn.CrossEntropyLoss()
+        # TODO: adjusto to include libero
 
         # self._setup_loaders()
 
@@ -76,8 +70,25 @@ class Workspace:
         )
         self.train_set, self.test_set = self.dataset
         self._setup_loaders()
+        self.init_data = InitialStateData(
+            dataset=self.train_set.dataset.dataset,
+            option_dim=self.num_options)
+        # self.init_data = minorCustomData(data_directory=cfg.env.dataset_fn.data_directory, device=cfg.device, option_dim=self.num_options)
+        self.init_dataloader = DataLoader(self.init_data, batch_size=64, shuffle=True)
+
+        # Simple MLP to sample an initial option.
+        self.init_prob = torch.nn.Sequential(
+            torch.nn.Linear(self.init_data[0][0].size(0), self.init_data[0][0].size(0)//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.init_data[0][0].size(0)//2, self.num_options),
+        ).to(self.device)
+        self.init_optimizer = torch.optim.Adam(
+            self.init_prob.parameters()
+            )
+        self.init_criterion = torch.nn.CrossEntropyLoss()
+
         self.student = getattr(students, cfg.student_type.capitalize())(
-            option_dim=7,
+            option_dim=self.num_options,
             state_prior=self.state_prior,
             action_ae=self.action_ae,
             dataset=self.train_set.dataset.dataset)
@@ -125,7 +136,7 @@ class Workspace:
         if self.state_prior is None:  # possibly already initialized from snapshot
             self.state_prior = hydra.utils.instantiate(
                 self.cfg.state_prior,
-                latent_dim=self.action_ae.latent_dim,
+                latent_dim=self.num_options,
                 vocab_size=self.action_ae.num_latents,
             ).to(self.device)
             if self.cfg.data_parallel:
@@ -209,7 +220,7 @@ class Workspace:
 
                 # Book keeping
                 targets = gt_option.to(enc_obs.device)[:,1:]
-                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+                targets = F.one_hot(targets.to(torch.int64), num_classes=self.num_options).to(torch.float)
                 loss3 = F.cross_entropy(
                     logits.view(-1, logits.size(-1)),
                     targets.view(-1, logits.size(-1)))
@@ -238,7 +249,7 @@ class Workspace:
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
                 
                 targets = gt_option.to(enc_obs.device)[:,1:]
-                targets = F.one_hot(targets.to(torch.int64), num_classes=7).to(torch.float)
+                targets = F.one_hot(targets.to(torch.int64), num_classes=self.num_options).to(torch.float)
                 loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
                 loss4 = (gt_option!=option).sum() / option.numel()
                 self.log_append("option_eval", len(observations), {
@@ -298,8 +309,8 @@ class Workspace:
             self.prior_epoch = epoch
             # update options every epoch
             self.train_set.dataset.dataset.update_options(self.student) 
-            self.train_prior()  # Trains prior and queries oracle
             self.train_init_state(epoch)
+            self.train_prior()  # Trains prior and queries oracle
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
                 self.eval_prior()
             self.flush_log(epoch=epoch + self.epoch, iterator=self.state_prior_iterator)

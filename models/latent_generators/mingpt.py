@@ -24,7 +24,7 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
         attn_pdrop: float = 0.1,
         block_size: int = 128,
         vocab_size: int = 50257,
-        latent_dim: int = 768,  # Ignore, used for compatibility with other models.
+        latent_dim: int = 7,  # Ignore, used for compatibility with other models.
         action_dim: int = 0,
         discrete_input: bool = False,
         predict_offsets: bool = False,
@@ -63,9 +63,8 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             resid_pdrop=resid_pdrop,
             attn_pdrop=attn_pdrop,
         )
-
-        self.model = mingpt_model.GPT(gpt_config)
-        self.option_model = option_model.GPT(gpt_config)
+        self.model = mingpt_model.GPT(gpt_config, num_options=latent_dim)
+        self.option_model = option_model.GPT(gpt_config, num_options=latent_dim)
         # self.option_model.option_embedding = self.model.option_embedding
 
     def get_latent_and_loss(

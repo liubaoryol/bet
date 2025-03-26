@@ -1,9 +1,9 @@
 defaults:
   - _self_
   - encoder: identity
-  - action_ae: discretizers/k_means_kitchen_best
-  - env: relay_kitchen_traj
-  - state_prior: mingpt_kitchen_best
+  - action_ae: discretizers/k_means_libero
+  - env: libero
+  - state_prior: mingpt_libero_best
   - env_vars: env_vars
 
 lazy_init_models: False
@@ -16,8 +16,8 @@ window_size: 10
 
 # Supervision parameters
 student_type: latent_entropy_based # latent_entropy_based, unsupervised, IterativeRandom, QueryCapLimit, Random
-query_freq: 3
-num_queries: 1 # number of queries per access to oracle
+query_freq: 1
+num_queries: 5 # number of queries per access to oracle
 randomst_query_percent: 0.2
 
 # Training details
@@ -36,7 +36,7 @@ grad_norm_clip: 1.0
 seed: 42
 
 # Prior training details
-num_prior_epochs: 100
+num_prior_epochs: 200
 eval_prior_every: 1
 save_prior_every: 1
 
@@ -45,8 +45,8 @@ eval_every: 1
 save_every: 1
 
 # Wandb config
-project: new_experiments_students
-experiment: kitchen_train
+project: libero_experiments
+experiment: libero_train
 
 hydra:
   job:

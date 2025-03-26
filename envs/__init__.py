@@ -83,3 +83,13 @@ except:
     logging.error(
         "Block pushing could not be imported. Make sure you have PyBullet installed."
     )
+
+try:
+    register(
+        id="libero-goal-v0",
+        entry_point="envs.libero.libero_goal:ConcatControlEnv",
+        max_episode_steps=5,
+        reward_threshold=1.0,
+    )
+except ImportError:
+    logging.warning("Kitchen not installed, skipping")
