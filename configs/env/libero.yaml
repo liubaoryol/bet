@@ -1,16 +1,16 @@
 name: libero-goal-v0
 args: []
 kw_init_option_modelargs: {}
-obs_dim: 137 #9 if only joint and gripper states are used.
+obs_dim:  137 # 137 or 9 if only joint and gripper states are used.
 action_dim: 7
 latent_dim: 10
 action_min: null
 action_max: null
 # BeT baseline
 # Supervised
-# load_dir: /home/liubove/Documents/my-packages/bet/exp_local/2025.03.21/161211_libero_train
+load_dir: /home/liubove/Documents/my-packages/bet/exp_local/2025.03.29/142956_libero_train
 # Unsupervised
-load_dir: /tmp
+# load_dir: /tmp
 workspace:
   _target_: workspaces.libero_exec.LiberoWorkspace
 

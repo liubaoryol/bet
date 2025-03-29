@@ -11,8 +11,8 @@ benchmark_instance = BENCHMARK_MAPPING['libero_goal'](task_order)
 env_args = {'camera_heights': 128,
  'camera_widths': 128,
  'has_renderer': True,
- 'has_offscreen_renderer': False, 
- 'use_camera_obs': False }
+ 'has_offscreen_renderer': True, 
+ 'use_camera_obs': True }
 
 # dataset_path = os.path.join(datasets_default_path, benchmark_instance.get_task_demonstration(i))
 # task_i_dataset, shape_meta = get_dataset(

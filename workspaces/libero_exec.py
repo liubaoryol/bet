@@ -8,6 +8,7 @@ import umap
 import umap.plot
 import wandb
 import logging
+import pickle
 
 import utils
 import numpy as np
@@ -16,7 +17,12 @@ from pathlib import Path
 
 from workspaces import base
 import envs
+from dataloaders.libero_utils import set_sam_encoder
 
+
+PREDICTOR = set_sam_encoder()
+pca_agentview = pickle.load(open("/home/liubove/Documents/my-packages/bet/pca_agentview.pkl",'rb')) 
+pca_eye_in_hand = pickle.load(open("/home/liubove/Documents/my-packages/bet/pca_eye_in_hand.pkl",'rb'))
 
 class LiberoWorkspace(base.Workspace):
     def _setup_plots(self):
@@ -151,6 +157,31 @@ class LiberoWorkspace(base.Workspace):
         logging.info(f"Number of queries: {n_queries}")
         print("Number of queries", n_queries)
         return total_reward, obs_history, action_history, latent_history, info
+    def get_obs(self, obs):
+        if self.cfg.env.dataset_fn.use_image_data:
+            agentview_img = obs['agentview_image']
+            eye_in_hand_img = obs['robot0_eye_in_hand_image']
+            with torch.no_grad():
+                PREDICTOR.set_image(agentview_img)
+            agentview_img = PREDICTOR.features.reshape(1,-1).cpu().numpy()
+            agentview_img = pca_agentview.transform(agentview_img)
+
+            with torch.no_grad():
+                PREDICTOR.set_image(eye_in_hand_img)
+            eye_in_hand_img = PREDICTOR.features.reshape(1,-1).cpu().numpy()
+            eye_in_hand_img = pca_agentview.transform(eye_in_hand_img)
+
+            obs = np.concatenate((
+                obs['robot0_gripper_qpos'],
+                obs['robot0_joint_pos'],
+                agentview_img[0],
+                eye_in_hand_img[0]
+                ))
+        else:    
+            obs = np.concatenate((
+                obs['robot0_gripper_qpos'],
+                obs['robot0_joint_pos']))
+        return obs
     
     def run_single_episode(self):
         from envs.libero.libero_goal import benchmark_instance, env_args, ControlEnv
@@ -171,7 +202,7 @@ class LiberoWorkspace(base.Workspace):
             for init_state in init_states:
                 env.reset()
                 obs = env.set_init_state(init_state)
-                obs = np.concatenate((obs['robot0_gripper_qpos'], obs['robot0_joint_pos']))
+                obs = self.get_obs(obs)
                 option = torch.Tensor([[o]]).to(int).to('cuda')
                 last_obs = obs
                 action, latents, (_, _) = self._get_action(
@@ -192,7 +223,8 @@ class LiberoWorkspace(base.Workspace):
                     if self.cfg.enable_render:
                         env.env.render()
                     obs, reward, done, info = env.step(action)
-                    obs = np.concatenate((obs['robot0_gripper_qpos'], obs['robot0_joint_pos']))
+
+                    obs = self.get_obs(obs)
                     # obs = env.get_sim_state()
                     # obs = obs[:11]
                     total_reward += reward

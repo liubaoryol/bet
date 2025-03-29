@@ -57,7 +57,7 @@ def set_sam_encoder():
     return predictor
 
 
-def get_libero_images(dataset):
+def get_libero_images(dataset, predictor, pca_agentview, pca_eye_in_hand):
     agent_images = []
     eye_in_hand_images = []
 
@@ -81,12 +81,16 @@ def get_libero_images(dataset):
     return agent_images, eye_in_hand_images
 
 
-def get_libero_images_all(datasets):
+def get_libero_images_all(datasets, predictor, pca_agentview, pca_eye_in_hand):
     agent_images_full = []
     eye_in_hand_images_full = []
     for dataset in datasets:
         print("Getting features from ", dataset.hdf5_path)
-        agent_images, eye_in_hand_images = get_libero_images(dataset)
+        agent_images, eye_in_hand_images = get_libero_images(dataset,
+                                                             predictor,
+                                                             pca_agentview,
+                                                             pca_eye_in_hand
+                                                             )
         agent_images_full += agent_images
         eye_in_hand_images_full += eye_in_hand_images
 
@@ -151,7 +155,7 @@ def fit_pca_models(imgs1, imgs2):
 # pca_eye_in_hand = pickle.load(open("pca_eye_in_hand.pkl",'rb'))
 
 # datasets = [get_dataset(i, True, DATA_DIRECTORY) for i in range(10)]
-# imgs1, imgs2 = get_libero_images_all(datasets)
+# imgs1, imgs2 = get_libero_images_all(datasets, predictor, pca_agentview, pca_eye_in_hand)
 
 # agentview_feats = np.vstack(imgs1)
 # eye_in_hand_feats = np.vstack(imgs2)
