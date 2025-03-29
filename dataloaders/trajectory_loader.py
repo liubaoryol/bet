@@ -1,35 +1,31 @@
 import logging
-import einops
 import os
-import torch
-import torch.nn as nn
 import time
-from copy import deepcopy as copy
-import torch.nn.functional as F
-from torch.utils.data import TensorDataset, Dataset
+from typing import Union, Callable, Optional
 from pathlib import Path
 import numpy as np
-from envs.multi_route import multi_route
+from tqdm import tqdm
+import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset, Dataset
 from utils import (
     shuffle_along_axis,
     transpose_batch_timestep,
     split_datasets,
     eval_mode,
 )
-from typing import Union, Callable, Optional
-from tqdm import tqdm
-import envs
-import gym
+
+
 from students.base import Oracle
 from dataloaders.latent_estimation.parallelize_latent_estimation import (
     paralellize_prob_latent,
-    paralellize_update_latent_viterbi,
     single_prob_latent)
-from dataloaders.latent_estimation.fb_algorithm_latent import update_latent_viterbi, prob_latent
+from dataloaders.latent_estimation.fb_algorithm_latent import (
+    update_latent_viterbi,
+    prob_latent)
+from dataloaders.libero_utils import get_dataset, adapt_data_to_bet
+from envs.multi_route import multi_route
 
-from robomimic.utils.dataset import SequenceDataset
-from torch.utils.data import ConcatDataset
-from libero.libero.benchmark import BENCHMARK_MAPPING
 
 OBS_ELEMENT_INDICES = {
     "bottom burner": np.array([11, 12]),
@@ -77,19 +73,10 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
         masks = torch.from_numpy(masks).to(device).float()
         self.masks = masks
         self.device = device
-        # I will have three variables for holding options
-        # Real options hold the ground truth options. These will be used for reference, 
-        # or for when querying for the option, to have access to it. This is used only
-        # inside current class
-        # 
-        # options hold estimated options, to be used outside of this class during training
-        # options will be estimated for each time step using option model and skip model
-
         # available_opts
         gt_options = self._calculate_gt_options(observations)
         self.oracle = Oracle(true_options=gt_options)
         observations = observations[:,:,:obs_shape]
-        # TODO: Find self._gt_options and self._available_gt_options -> student.annotated_opts
         
         self.options = torch.zeros_like(masks).int()
         super().__init__(
@@ -100,7 +87,6 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             torch.from_numpy(gt_options).to(device).int()
 
         )
-        # self.visualize()
         self.actions = self.tensors[1]
 
     def query_oracle(self, student, num_queries=1):
@@ -200,54 +186,41 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
 
 class LiberoTrajectoryDataset(TensorDataset):
     def __init__(self,
-                 data_directory='/home/liubove/Documents/my-packages/LIBERO/libero/datasets',
+                 data_directory=None,
+                 use_image_data=False,
                  device="cpu"):
 
-        benchmark_instance = BENCHMARK_MAPPING['libero_goal'](task_order_index=0)
         observations = []
         actions = []
         masks = []
-        from libero.lifelong.datasets import get_dataset
+        self.use_image_data = use_image_data
         gt_options = []
 
-        modality = {
-            'rgb': [], #["agentview_rgb", "eye_in_hand_rgb"],
-            'depth': [],
-            'low_dim': ["gripper_states", "joint_states"]
-        }
-        for i in range(10):
-            import robomimic.utils.obs_utils as ObsUtils
-            ObsUtils.initialize_obs_utils_with_obs_specs({"obs": modality})
-            
-            dataset_path = os.path.join(data_directory, benchmark_instance.get_task_demonstration(i))
-
-            dataset = SequenceDataset(
-                hdf5_path=dataset_path,
-                obs_keys=["gripper_states", "joint_states"],
-                dataset_keys=["actions", "dones"],
-                load_next_obs=False,
-                frame_stack=1,
-                seq_length=1,  # length-10 temporal sequences
-                pad_frame_stack=True,
-                pad_seq_length=True,  # pad last obs per trajectory to ensure all sequences are sampled
-                get_pad_mask=False,
-                goal_mode=None,
-                hdf5_cache_mode='low_dim',  # cache dataset in memory to avoid repeated file i/o
-                hdf5_use_swmr=False,
-                hdf5_normalize_obs=None,
-            )
-            obs, acts, mask, gt_opts = self.extract_data(dataset, subtask=i,obs_dim = 9, act_dim=7)
+        for i in range(10):  
+            dataset = get_dataset(i, use_image_data, data_directory)
+            obs, acts, mask, gt_opts = adapt_data_to_bet(dataset,
+                                                         subtask=i,
+                                                         obs_dim = 9,
+                                                         act_dim=7)
             observations.append(obs)
             actions.append(acts)
             masks.append(mask)
             gt_options.append(gt_opts)
-            
+        
         observations = np.vstack(observations)
         actions = np.vstack(actions)
         masks = np.vstack(masks)
         gt_options = np.vstack(gt_options)
 
-
+        if use_image_data:
+            from dataloaders.libero_utils import append_images_to_robot_state
+            agent_feats = np.load(os.path.join(data_directory, 'agentview_feats.npy'))
+            eye_in_hand_feats = np.load(os.path.join(data_directory,'eye_in_hand_feats.npy'))
+            concat = np.concatenate((agent_feats, eye_in_hand_feats), axis=1)
+            observations = append_images_to_robot_state(
+                observations, concat, masks
+            )
+        
         masks = torch.from_numpy(masks).to(device).float()
         self.masks = masks
         self.device = device
@@ -262,36 +235,8 @@ class LiberoTrajectoryDataset(TensorDataset):
             torch.from_numpy(gt_options).to(device).int()
 
         )
-        # self.visualize()
         self.actions = self.tensors[1]
 
-    def extract_data(self, 
-                     dataset,
-                     horizon = 400,
-                     subtask=0,
-                     obs_dim=None,
-                     act_dim=None):
-            
-            n_demos = dataset.n_demos
-
-            observations = np.zeros((n_demos, horizon, obs_dim))
-            actions = np.zeros((n_demos, horizon, act_dim))
-            masks = np.zeros((n_demos, horizon))
-            gt_options = np.ones((n_demos, horizon)) * subtask
-            
-            curr_demo = 0
-            prev_steps = 0
-            for idx in range(len(dataset)):
-                data = dataset[idx]
-                observations[curr_demo][idx-prev_steps] = np.concatenate((data['obs']['gripper_states'], data['obs']['joint_states']),axis=1)
-                # observations[curr_demo][idx-prev_steps] = data['states']
-                actions[curr_demo][idx-prev_steps] = data['actions']
-                masks[curr_demo][idx-prev_steps] = 1
-                if data['dones']==1:
-                    curr_demo +=1
-                    prev_steps = idx+1
-            
-            return observations, actions, masks, gt_options
 
     def get_stats(self):
         stats = {t:0 for t in range(10)}
@@ -797,9 +742,10 @@ def get_libero_train_val(
         train_fraction=0.9,
         random_seed=42,
         device="cpu",
-        window_size=10
+        window_size=10,
+        use_image_data=False
 ):
-    dataset_full = LiberoTrajectoryDataset(data_directory)
+    dataset_full = LiberoTrajectoryDataset(data_directory, use_image_data)
     train_set, val_set = split_datasets(
         dataset_full,
         train_fraction=train_fraction,
