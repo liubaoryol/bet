@@ -189,6 +189,7 @@ class Workspace:
             for data in pbar:
                 number +=1
                 self.query_time +=1
+                # import pdb; pdb.set_trace()
                 if not self.student.single_query_only:
                     if not self.query_time%self.query_freq:
                         trjs_changed = self.student.query_oracle(
@@ -198,17 +199,30 @@ class Workspace:
                             self.train_set.dataset.dataset.update_options_of_traj(
                                 self.student,
                                 traj_num)
-
-                observations, action, mask, option, gt_option = data
+                if self.cfg.env.dataset_fn.use_image_data:
+                    observations, action, mask, option, gt_option, idx = data
+                else:
+                    observations, action, mask, option, gt_option = data
                 self.state_prior_optimizer.zero_grad(set_to_none=True)
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
-                _, loss, loss_components = self.state_prior.get_latent_and_loss(
-                    obs_rep=(enc_obs, option),
-                    target_latents=latent,
-                    return_loss_components=True,
-                )
+
+                if self.cfg.env.dataset_fn.use_image_data:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                        idx= idx,
+                        dataset = self.train_set.dataset.dataset
+                    )
+                else:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                    )
+                    
                 logits, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:,1:])
                 loss.backward()
                 loss2.backward()
@@ -230,20 +244,78 @@ class Workspace:
                     'gt_cross_entropy': loss3,
                     'fwbw_estimation': loss4})
                 self.log_append("prior_train", len(observations), loss_components)
+    
+    def train_action_policy_from_scratch(self):
+        # Assume labeling is done, so querying is not part of this anymore
+
+        self.state_prior.train()
+        
+        with utils.eval_mode(self.obs_encoding_net, self.action_ae):
+            pbar = tqdm.tqdm(
+                self.train_loader, desc=f"Training policy epoch {self.prior_epoch}"
+            )
+            for data in pbar:
+
+                if self.cfg.env.dataset_fn.use_image_data:
+                    observations, action, mask, option, gt_option, idx = data
+                else:
+                    observations, action, mask, option, gt_option = data
+                self.state_prior_optimizer.zero_grad(set_to_none=True)
+                obs, act = observations.to(self.device), action.to(self.device)
+                enc_obs = self.obs_encoding_net(obs)
+                latent = self.action_ae.encode_into_latent(act, enc_obs)
+                if self.cfg.env.dataset_fn.use_image_data:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                        idx= idx,
+                        dataset = self.train_set.dataset.dataset
+                    )
+                else:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                    )
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.state_prior.parameters(), self.cfg.grad_norm_clip
+                )
+                self.state_prior_optimizer.step()
+
+                # Book keeping
+                targets = gt_option.to(enc_obs.device)[:,1:]
+                targets = F.one_hot(targets.to(torch.int64), num_classes=self.num_options).to(torch.float)
+
+                self.log_append("final_policy_train", len(observations), loss_components)
 
     def eval_prior(self):
         with utils.eval_mode(
             self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
         ):
-            for observations, action, mask, option, gt_option in self.test_loader:
+            for data in self.test_loader:
+                if self.cfg.env.dataset_fn.use_image_data:
+                    observations, action, mask, option, gt_option, idx = data
+                else:
+                    observations, action, mask, option, gt_option = data
                 obs, act = observations.to(self.device), action.to(self.device)
                 enc_obs = self.obs_encoding_net(obs)
                 latent = self.action_ae.encode_into_latent(act, enc_obs)
-                _, loss, loss_components = self.state_prior.get_latent_and_loss(
-                    obs_rep=(enc_obs, option),
-                    target_latents=latent,
-                    return_loss_components=True,
-                )
+                if self.cfg.env.dataset_fn.use_image_data:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                        idx= idx,
+                        dataset = self.train_set.dataset.dataset
+                    )
+                else:
+                    _, loss, loss_components = self.state_prior.get_latent_and_loss(
+                        obs_rep=(enc_obs, option),
+                        target_latents=latent,
+                        return_loss_components=True,
+                    )
                 self.log_append("prior_eval", len(observations), loss_components)
 
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
@@ -311,6 +383,32 @@ class Workspace:
             self.train_set.dataset.dataset.update_options(self.student) 
             self.train_init_state(epoch)
             self.train_prior()  # Trains prior and queries oracle
+            if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
+                self.eval_prior()
+            self.flush_log(epoch=epoch + self.epoch, iterator=self.state_prior_iterator)
+            self.prior_epoch += 1
+            if ((self.prior_epoch + 1) % self.cfg.save_prior_every) == 0:
+                self.save_snapshot()
+
+        tag_func = (
+            lambda m: m.module.__class__.__name__
+            if self.cfg.data_parallel
+            else m.__class__.__name__
+        )
+        tags = tuple(
+            map(tag_func, [self.obs_encoding_net, self.action_ae, self.state_prior])
+        )
+        self.wandb_run.tags += tags
+
+        self.state_prior.model.apply(self.state_prior.model._init_weights)
+        self.state_policy_only_iterator = tqdm.trange(
+            0, self.cfg.num_policy_only_epochs
+        )
+        self.state_policy_only_iterator.set_description("Training policy only: ")
+        for epoch in self.state_policy_only_iterator:
+            self.prior_epoch = epoch
+            self.train_init_state(epoch)
+            self.train_action_policy_from_scratch()  # Trains prior and queries oracle
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
                 self.eval_prior()
             self.flush_log(epoch=epoch + self.epoch, iterator=self.state_prior_iterator)

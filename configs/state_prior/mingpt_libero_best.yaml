@@ -1,4 +1,4 @@
-_target_: models.latent_generators.mingpt.MinGPT
+_target_: models.latent_generators.libero_model_wrapper.LiberoModel
 
 discrete_input: false
 input_dim: ${encoder.output_dim}

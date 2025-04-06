@@ -1,94 +1,78 @@
+from dataclasses import dataclass
+from torchvision.models import resnet18, ResNet18_Weights
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision
 import einops
-import models.latent_generators.latent_generator as latent_generator
-
-import models.libraries.mingpt.skip_gpt as mingpt_model
-import models.libraries.mingpt.model as option_model
-import models.libraries.mingpt.trainer as mingpt_trainer
-from models.libraries.loss_fn import FocalLoss, soft_cross_entropy
-
 from typing import Optional, Tuple
+import torch.nn.functional as F
+import models.libraries.mingpt.model as option_model
+from models.latent_generators.mingpt import MinGPT
+from models.libraries.loss_fn import FocalLoss, soft_cross_entropy
+import numpy as np
 
+class LiberoModel(MinGPT):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.agentview_model = resnet18(num_classes = 64)
+        self.eye_in_hand_model = resnet18(num_classes = 64)
+        self.gpt_config.input_size = 9
+        num_options = self.option_model.num_options
+        self.option_model = option_model.GPT(self.gpt_config, num_options=num_options)
 
-class MinGPT(latent_generator.AbstractLatentGenerator):
-    def __init__(
-        self,
-        input_dim: int,
-        n_layer: int = 12,
-        n_head: int = 12,
-        n_embd: int = 768,
-        embd_pdrop: float = 0.1,
-        resid_pdrop: float = 0.1,
-        attn_pdrop: float = 0.1,
-        block_size: int = 128,
-        vocab_size: int = 50257,
-        latent_dim: int = 7,  # Ignore, used for compatibility with other models.
-        action_dim: int = 0,
-        discrete_input: bool = False,
-        predict_offsets: bool = False,
-        offset_loss_scale: float = 1.0,
-        focal_loss_gamma: float = 0.0,
-        **kwargs
-    ):
-        super().__init__()
-        self.input_size = input_dim
-        self.n_layer = n_layer
-        self.n_head = n_head
-        self.n_embd = n_embd
-        self.embd_pdrop = embd_pdrop
-        self.resid_pdrop = resid_pdrop
-        self.attn_pdrop = attn_pdrop
-        self.block_size = block_size
-        self.vocab_size = vocab_size
-        self.action_dim = action_dim
-        self.predict_offsets = predict_offsets
-        self.offset_loss_scale = offset_loss_scale
-        self.focal_loss_gamma = focal_loss_gamma
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+        weights = ResNet18_Weights.DEFAULT
+        self.preprocess = weights.transforms()
 
-        gpt_config = mingpt_model.GPTConfig(
-            input_size=self.input_size,
-            vocab_size=self.vocab_size * (1 + self.action_dim)
-            if self.predict_offsets
-            else self.vocab_size,
-            block_size=self.block_size,
-            n_layer=n_layer,
-            n_head=n_head,
-            n_embd=n_embd,
-            discrete_input=discrete_input,
-            embd_pdrop=embd_pdrop,
-            resid_pdrop=resid_pdrop,
-            attn_pdrop=attn_pdrop,
-        )
-        self.gpt_config = gpt_config
-        self.model = mingpt_model.GPT(gpt_config, num_options=latent_dim)
-        self.option_model = option_model.GPT(gpt_config, num_options=latent_dim)
-        # self.option_model.option_embedding = self.model.option_embedding
-
+    def encode_images(self, seq_agentview, seq_eyeinhand):
+        """list seq_agentview numpy array B, C, H, W, returns (B, 128)"""
+        seq_agentview = self.preprocess(torch.from_numpy(np.stack(seq_agentview)))
+        seq_eyeinhand = self.preprocess(torch.from_numpy(np.stack(seq_eyeinhand)))
+        if seq_eyeinhand.dim()==3:
+            seq_eyeinhand = seq_eyeinhand.unsqueeze(0)
+            seq_agentview = seq_agentview.unsqueeze(0)
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        return torch.concat((self.agentview_model(seq_agentview.to(device)),self.eye_in_hand_model(seq_eyeinhand.to(device))), axis=1)
+    
     def get_latent_and_loss(
         self,
         obs_rep: torch.Tensor,
         target_latents: torch.Tensor,
         seq_masks: Optional[torch.Tensor] = None,
         return_loss_components: bool = False,
+        idx = None,
+        dataset = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Unlike torch.transformers, GPT takes in batch x seq_len x embd_dim
-        # obs_rep = einops.rearrange(obs_rep, "seq batch embed -> batch seq embed")
-        # target_latents = einops.rearrange(
-        #     target_latents, "seq batch embed -> batch seq embed"
-        # )
-        # While this has been trained autoregressively,
-        # there is no reason why it needs to be so.
-        # We can just use the observation as the input and the next latent as the target.
+        if idx is not None and dataset is not None:
+            # Append images to observation.
+            # For every sequence in batch, calculate output
+            # after all outputs are calculated, concat to enc_obs
+            outputs_agentview = []
+            outputs_eye_in_hand = []
+            counter = 0
+            for sequence in idx:
+                counter+=1
+                seq_agentview= []
+                seq_eyeinhand = []
+                for timestep in sequence:
+                    img1, img2 = dataset.get_images(timestep.item())
+                    seq_agentview.append(img1)
+                    seq_eyeinhand.append(img2)
+                
+                seq_agentview = self.preprocess(torch.from_numpy(np.stack(seq_agentview)))
+                seq_eyeinhand = self.preprocess(torch.from_numpy(np.stack(seq_eyeinhand)))
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                outputs_agentview.append(self.agentview_model(seq_agentview.to(device)))
+                outputs_eye_in_hand.append(self.eye_in_hand_model(seq_eyeinhand.to(device)))
+
+            enc_obs, option = obs_rep
+            res = torch.concat((enc_obs, torch.stack(outputs_agentview), torch.stack(outputs_eye_in_hand)), axis=2)
+            obs_rep = res, option
+
         if self.predict_offsets:
             target_latents, target_offsets = target_latents
+
         is_soft_target = (target_latents.shape[-1] == self.vocab_size) and (
             self.vocab_size != 1
         )
+
         if is_soft_target:
             target_latents = target_latents.view(-1, target_latents.size(-1))
             criterion = soft_cross_entropy
@@ -98,6 +82,7 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 # unify k-means (target_class == 0) and GMM (target_prob == 1)
                 target_latents = torch.zeros_like(target_latents)
             criterion = FocalLoss(gamma=self.focal_loss_gamma)
+        
         if self.predict_offsets:
             output, _ = self.model(obs_rep)
             logits = output[:, :, : self.vocab_size]
@@ -110,10 +95,7 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 V=self.vocab_size,
                 A=self.action_dim,
             )
-            # calculate (optionally soft) cross entropy and offset losses
             class_loss = criterion(logits.view(-1, logits.size(-1)), target_latents)
-            # offset loss is only calculated on the target class
-            # if soft targets, argmax is considered the target class
             selected_offsets = offsets[
                 torch.arange(offsets.size(0)),
                 target_latents.argmax(dim=-1).view(-1)
@@ -149,7 +131,7 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
                 return logits, loss, {"class": loss, "total": loss}
             else:
                 return logits, loss
-
+            
     def generate_latents(
         self, seq_obses: torch.Tensor, seq_masks: torch.Tensor, option=None
     ) -> torch.Tensor:
@@ -186,20 +168,3 @@ class MinGPT(latent_generator.AbstractLatentGenerator):
             return (sampled_data, sampled_offsets), (next_option, next_option_logs[-1][next_option].item())
         else:
             return sampled_data, (next_option, next_option_logs[-1][next_option].item())
-
-    def get_optimizer(
-        self, weight_decay: float, learning_rate: float, betas: Tuple[float, float]
-    ) -> torch.optim.Optimizer:
-        trainer_cfg = mingpt_trainer.TrainerConfig(
-            weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
-        )
-        return self.model.configure_optimizers(trainer_cfg)
-
-    def get_option_optimizer(
-            self, weight_decay: float, learning_rate:float, betas:Tuple[float, float]
-    ) -> torch.optim.Optimizer:
-        
-        trainer_cfg = mingpt_trainer.TrainerConfig(
-            weight_decay=weight_decay, learning_rate=learning_rate, betas=betas
-        )
-        return self.option_model.configure_optimizers(trainer_cfg)

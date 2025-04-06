@@ -49,16 +49,23 @@ def paralellize_prob_latent(
         actions,
         masks,
         student=None,
-        option_dim=7):
+        option_dim=7,
+        idxs=None,
+        dataset=None):
 
     log_acts_full, log_opts_full = [], []
     for sl in [slice(0, 200), slice(200, 400), slice(400, None)]:
+        idx_slice = None
+        if idxs is not None:
+            idx_slice = idxs[sl]
         log_acts, log_opts = aux_probs(
             states[sl],
             actions[sl],
             student.state_prior,
             student.action_ae,
-            option_dim
+            option_dim,
+            idx_slice,
+            dataset
             )
         log_acts_full.append(log_acts)
         log_opts_full.append(log_opts)

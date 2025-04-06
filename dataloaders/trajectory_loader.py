@@ -195,48 +195,75 @@ class LiberoTrajectoryDataset(TensorDataset):
         masks = []
         self.use_image_data = use_image_data
         gt_options = []
-
+        self.datasets = []
         for i in range(10):  
             dataset = get_dataset(i, use_image_data, data_directory)
-            obs, acts, mask, gt_opts = adapt_data_to_bet(dataset,
-                                                         subtask=i,
-                                                         obs_dim = 9,
-                                                         act_dim=7)
+            obs, acts, mask, gt_opts = adapt_data_to_bet(
+                dataset,
+                subtask=i,
+                obs_dim = 9,
+                act_dim=7)
+                
             observations.append(obs)
             actions.append(acts)
             masks.append(mask)
             gt_options.append(gt_opts)
-        
+            self.datasets.append(dataset)
+
         observations = np.vstack(observations)
         actions = np.vstack(actions)
         masks = np.vstack(masks)
         gt_options = np.vstack(gt_options)
 
-        if use_image_data:
-            from dataloaders.libero_utils import append_images_to_robot_state
-            agent_feats = np.load(os.path.join(data_directory, 'agentview_feats.npy'))
-            eye_in_hand_feats = np.load(os.path.join(data_directory,'eye_in_hand_feats.npy'))
-            concat = np.concatenate((agent_feats, eye_in_hand_feats), axis=1)
-            observations = append_images_to_robot_state(
-                observations, concat, masks
-            )
-        
         masks = torch.from_numpy(masks).to(device).float()
         self.masks = masks
         self.device = device
         self.oracle = Oracle(true_options=gt_options)
-        
+        self.n_trjs, self.len_trjs = masks.shape
         self.options = torch.zeros_like(masks).int()
-        super().__init__(
-            torch.from_numpy(observations).to(device).float(),
-            torch.from_numpy(actions).to(device).float(),
-            masks,
-            self.options,
-            torch.from_numpy(gt_options).to(device).int()
-
-        )
+        self.set_idx2trj_dict()
+        if use_image_data:
+            super().__init__(
+                torch.from_numpy(observations).to(device).float(),
+                torch.from_numpy(actions).to(device).float(),
+                masks,
+                self.options,
+                torch.from_numpy(gt_options).to(device).int(),
+                torch.arange(self.n_trjs*self.len_trjs).reshape(self.n_trjs, self.len_trjs)
+            )
+        else:
+            super().__init__(
+                torch.from_numpy(observations).to(device).float(),
+                torch.from_numpy(actions).to(device).float(),
+                masks,
+                self.options,
+                torch.from_numpy(gt_options).to(device).int(),
+            )
         self.actions = self.tensors[1]
 
+    def get_images(self, idx):
+        dataset_num, timestep = self.idx2trj_dict[idx]
+        dataset = self.datasets[dataset_num]
+        obs = dataset[timestep]['obs']
+
+        agentview_rgb = np.moveaxis(obs['agentview_rgb'][0], 2, 0)
+        eye_in_hand_rgb = np.moveaxis(obs['eye_in_hand_rgb'][0], 2, 0)
+        return agentview_rgb, eye_in_hand_rgb
+
+    def set_idx2trj_dict(self):
+        self.idx2trj_dict = {}
+        for dataset_num, dataset in enumerate(self.datasets):
+            trj_num = 0
+            timestep = 0
+            for data_idx in range(len(dataset)):
+                data = dataset[data_idx]
+                done = data['dones'].item()
+                idx = dataset_num * 50 *400 + trj_num * 400 + timestep
+                self.idx2trj_dict[idx] = (dataset_num, data_idx)
+                timestep +=1
+                if done:
+                    trj_num +=1
+                    timestep = 0
 
     def get_stats(self):
         stats = {t:0 for t in range(10)}
@@ -255,15 +282,24 @@ class LiberoTrajectoryDataset(TensorDataset):
         for i, opt in enumerate(opts):
             opt = torch.multinomial(torch.from_numpy(opt), 1)
             self.options[i][:len(opt)] = opt.squeeze(1)
-        obs, acts, masks, _, gt_opts = self.tensors
-        self.tensors = (obs, acts, masks, self.options, gt_opts)
+        if self.use_image_data:
+            obs, acts, masks, _, gt_opts, idx = self.tensors
+            self.tensors = (obs, acts, masks, self.options, gt_opts, idx)
+        else:
+            obs, acts, masks, _, gt_opts = self.tensors
+            self.tensors = (obs, acts, masks, self.options, gt_opts)
 
     def update_options_of_traj(
             self,
             student,
             traj_num
             ):
-        observations, actions, masks, _, gt_opts = self.tensors
+        
+        if self.use_image_data:
+            observations, actions, masks, _, gt_opts, idx = self.tensors
+        else:
+            observations, actions, masks, _, gt_opts = self.tensors
+        
         obs = observations[traj_num].unsqueeze(0)
         acts = actions[traj_num].unsqueeze(0)
         from dataloaders.latent_estimation.log_probs import aux_probs
@@ -297,12 +333,19 @@ class LiberoTrajectoryDataset(TensorDataset):
     def get_probs(self, student, save=True):
         print("Estimating probs for all traj latents. Please wait...")
         now = time.perf_counter()
-        observations, actions, masks, _, _ = self.tensors
+        if self.use_image_data:
+            observations, actions, masks, _, _, idxs = self.tensors
+        else:
+            observations, actions, masks, _, _ = self.tensors
+            idxs = None
+        
         probs = paralellize_prob_latent(observations.to('cuda'),
                                         actions.to('cuda'),
                                         masks.to('cuda'),
                                         student,
-                                        option_dim=10)
+                                        option_dim=10,
+                                        idxs=idxs,
+                                        dataset=self)
         transcurrido = time.perf_counter()-now
         print("Done! Elapsed time for ", len(self), " trajectories was: ", transcurrido)
         if save:
@@ -341,6 +384,85 @@ class LiberoTrajectoryDataset(TensorDataset):
             result.append(self.actions[i, :T, :])
         return torch.cat(result, dim=0)
 
+# from robomimic.utils.dataset import SequenceDataset # type: ignore
+# from libero.libero.benchmark import BENCHMARK_MAPPING # type: ignore
+
+# BENCHMARK = BENCHMARK_MAPPING['libero_goal'](task_order_index=0)
+# from torch.utils.data import ConcatDataset
+# class SequenceLatentDataset(SequenceDataset):
+#     def set_option(self, option):
+#         self.option = option
+#     def __getitem__(self, idx):
+#         if type(idx) == slice:
+
+#         data  = super().__getitem__(idx)
+#         data['option'] = self.option
+#         return data
+
+# class LiberoTrajectoryDatasetImage(TensorDataset):
+#     def __init__(self,
+#                  data_directory=None,
+#                  use_image_data=False,
+#                  device="cpu"):
+
+
+#         self.use_image_data = use_image_data
+#         datasets = []
+
+#         for i in range(10):      
+#             obs_keys = ["gripper_states", "joint_states",
+#                         "agentview_rgb", "eye_in_hand_rgb"]
+
+#             dataset_path = os.path.join(
+#                 data_directory, BENCHMARK.get_task_demonstration(i))
+#             dataset = SequenceLatentDataset(
+#                 hdf5_path=dataset_path,
+#                 obs_keys=obs_keys,
+#                 dataset_keys=["actions", "dones"],
+#                 load_next_obs=False,
+#                 frame_stack=1,
+#                 seq_length=1,
+#                 pad_frame_stack=True,
+#                 pad_seq_length=True,  
+#                 get_pad_mask=False,
+#                 goal_mode=None,
+#                 hdf5_cache_mode='low_dim', 
+#                 hdf5_use_swmr=False,
+#                 hdf5_normalize_obs=None,
+#             )
+#             dataset.set_option(i)
+#             datasets.append(dataset)
+#         self.datasets = ConcatDataset(datasets)
+    
+#     def __getitem__(self, i):
+#         # i represents a trajectory
+#         acts, dones, obs, options = [], [], [], []
+#         for idx in range(self.trj_ends[i], self.trj_ends[i+1]):
+#             acts, dones, obs, options = self.datasets[idx]
+    
+#     def set_trajectory_ends(self):
+#         self.trj_ends = [0]
+#         for idx in range(len(self.datasets)):
+#             if self.datasets[idx]['dones']:
+#                 self.trj_ends.append(idx+1)
+
+# def get_libero_train_val_img(
+#         data_directory,
+#         train_fraction=0.9,
+#         random_seed=42,
+#         device="cpu",
+#         window_size=10,
+#         use_image_data=False
+# ):
+#     dataset_full = LiberoTrajectoryDatasetImage(data_directory, use_image_data)
+#     train_set, val_set = split_datasets(
+#         dataset_full,
+#         train_fraction=train_fraction,
+#         random_seed=random_seed,
+#     )
+#     train_trajectories = TrajectorySlicerSubset(train_set, window=window_size)
+#     val_trajectories = TrajectorySlicerSubset(val_set, window=window_size)
+#     return train_trajectories, val_trajectories
 
 class CarlaMultipathTrajectoryDataset(Dataset):
     def __init__(

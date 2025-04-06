@@ -10,14 +10,14 @@ lazy_init_models: False
 
 # Dataset details
 train_fraction: 0.95
-batch_size: 64
+batch_size: 8
 num_workers: 16
 window_size: 10
 
 # Supervision parameters
 student_type: latent_entropy_based # latent_entropy_based, unsupervised, IterativeRandom, QueryCapLimit, Random
-query_freq: 1
-num_queries: 5 # number of queries per access to oracle
+query_freq: 3
+num_queries: 1 # number of queries per access to oracle
 randomst_query_percent: 0.2
 
 # Training details
@@ -36,7 +36,8 @@ grad_norm_clip: 1.0
 seed: 42
 
 # Prior training details
-num_prior_epochs: 200
+num_prior_epochs: 100
+num_policy_only_epochs: 100
 eval_prior_every: 1
 save_prior_every: 1
 

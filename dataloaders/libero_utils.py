@@ -23,7 +23,6 @@ DATA_DIRECTORY = '/home/liubove/Documents/my-packages/LIBERO/libero/datasets'
 TINYSAM ="/home/liubove/Documents/git-packages/TinySAM/weights/tinysam_42.3.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-
 def get_dataset(i, use_image_data, data_directory=DATA_DIRECTORY):
     obs_keys = ["gripper_states", "joint_states"]
 
@@ -57,7 +56,7 @@ def set_sam_encoder():
     return predictor
 
 
-def get_libero_images(dataset, predictor, pca_agentview, pca_eye_in_hand):
+def get_libero_images_feats(dataset, predictor, pca_agentview, pca_eye_in_hand):
     agent_images = []
     eye_in_hand_images = []
 
@@ -81,16 +80,43 @@ def get_libero_images(dataset, predictor, pca_agentview, pca_eye_in_hand):
     return agent_images, eye_in_hand_images
 
 
-def get_libero_images_all(datasets, predictor, pca_agentview, pca_eye_in_hand):
+def get_libero_images_feats_all(datasets, predictor, pca_agentview, pca_eye_in_hand):
     agent_images_full = []
     eye_in_hand_images_full = []
     for dataset in datasets:
         print("Getting features from ", dataset.hdf5_path)
-        agent_images, eye_in_hand_images = get_libero_images(dataset,
+        agent_images, eye_in_hand_images = get_libero_images_feats(dataset,
                                                              predictor,
                                                              pca_agentview,
                                                              pca_eye_in_hand
                                                              )
+        agent_images_full += agent_images
+        eye_in_hand_images_full += eye_in_hand_images
+
+    return agent_images_full, eye_in_hand_images_full
+
+import torchvision
+
+def get_libero_images(dataset):
+    agent_images = []
+    eye_in_hand_images = []
+
+    for idx in range(len(dataset)):
+        data = dataset[idx]
+        img1 = data['obs']['agentview_rgb']
+        img2 = data['obs']['eye_in_hand_rgb']
+        agent_images.append(img1)
+        eye_in_hand_images.append(img2)
+    
+    return agent_images, eye_in_hand_images
+
+
+def get_libero_images_all(datasets):
+    agent_images_full = []
+    eye_in_hand_images_full = []
+    for dataset in datasets:
+        print("Getting images from ", dataset.hdf5_path)
+        agent_images, eye_in_hand_images = get_libero_images(dataset)
         agent_images_full += agent_images
         eye_in_hand_images_full += eye_in_hand_images
 
@@ -102,28 +128,38 @@ def adapt_data_to_bet(
         horizon = 400,
         subtask=0,
         obs_dim=None,
-        act_dim=None):
+        act_dim=None,
+        use_image_data=False):
     n_demos = dataset.n_demos
     observations = np.zeros((n_demos, horizon, obs_dim))
     actions = np.zeros((n_demos, horizon, act_dim))
     masks = np.zeros((n_demos, horizon))
     gt_options = np.ones((n_demos, horizon)) * subtask
-
+    imgs1 = np.zeros((n_demos, horizon, 3, 128, 128), dtype=np.uint8)
+    imgs2 = np.zeros((n_demos, horizon, 3, 128, 128), dtype=np.uint8)
     curr_demo = 0
     prev_steps = 0
     for idx in range(len(dataset)):
         data = dataset[idx]
         concat = np.concatenate((data['obs']['gripper_states'], 
-                                 data['obs']['joint_states']), axis=1)
-        
+                                 data['obs']['joint_states']), axis=1)        
         observations[curr_demo][idx-prev_steps] = concat
         actions[curr_demo][idx-prev_steps] = data['actions']
         masks[curr_demo][idx-prev_steps] = 1
+        if use_image_data:
+            imgs1[curr_demo][idx-prev_steps] = np.moveaxis(
+                data['obs']['agentview_rgb'][0], 2, 0)
+            imgs2[curr_demo][idx-prev_steps] = np.moveaxis(
+                data['obs']['eye_in_hand_rgb'][0], 2, 0)
+
         if data['dones']==1:
             curr_demo +=1
             prev_steps = idx+1
-
-    return observations, actions, masks, gt_options
+    if use_image_data:
+        return observations, actions, masks, gt_options, imgs1, imgs2
+    
+    else:
+        return observations, actions, masks, gt_options
 
 def append_images_to_robot_state(observations, image_features, masks):
     n_demos, horizon, obs_dim = observations.shape
@@ -155,7 +191,7 @@ def fit_pca_models(imgs1, imgs2):
 # pca_eye_in_hand = pickle.load(open("pca_eye_in_hand.pkl",'rb'))
 
 # datasets = [get_dataset(i, True, DATA_DIRECTORY) for i in range(10)]
-# imgs1, imgs2 = get_libero_images_all(datasets, predictor, pca_agentview, pca_eye_in_hand)
+# imgs1, imgs2 = get_libero_images_feats_all(datasets, predictor, pca_agentview, pca_eye_in_hand)
 
 # agentview_feats = np.vstack(imgs1)
 # eye_in_hand_feats = np.vstack(imgs2)
