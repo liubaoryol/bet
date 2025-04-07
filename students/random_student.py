@@ -22,7 +22,6 @@ class Iterativerandom(CuriousPupil):
         for _ in range(num_queries):
             traj_num = np.random.randint(len(oracle.true_options))
             changed = self._query_single_demo(oracle, traj_num)
-            self._num_queries += 1
             if changed:
                 changed_trjs.add(traj_num)
         return changed_trjs
@@ -61,7 +60,6 @@ class Random(CuriousPupil):
             changed = self._query_single_demo(oracle, traj_num)
             if changed:
                 changed_trjs.add(traj_num)
-        self._num_queries += 1
         return changed_trjs
 
     def _query_single_demo(self, oracle, traj_num):
@@ -96,7 +94,6 @@ class QueryCapLimit(CuriousPupil):
             changed = self._query_single_demo(oracle, traj_num)
             if changed:
                 changed_trjs.add(traj_num)
-        self._num_queries += 1
         return changed_trjs
 
     def _query_single_demo(self, oracle, traj_num):

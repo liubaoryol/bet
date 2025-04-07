@@ -183,6 +183,8 @@ class RelayKitchenTrajectoryDataset(TensorDataset):
             result.append(self.actions[i, :T, :])
         return torch.cat(result, dim=0)
 
+    # def __len__(self):
+    #     return int(self.masks.sum().item())
 
 class LiberoTrajectoryDataset(TensorDataset):
     def __init__(self,
@@ -240,6 +242,9 @@ class LiberoTrajectoryDataset(TensorDataset):
                 torch.from_numpy(gt_options).to(device).int(),
             )
         self.actions = self.tensors[1]
+
+    # def __len__(self):
+    #     return int(self.masks.sum().item())
 
     def get_images(self, idx):
         dataset_num, timestep = self.idx2trj_dict[idx]
@@ -843,7 +848,8 @@ def get_relay_kitchen_train_val(
     train_fraction=0.9,
     random_seed=42,
     device="cpu",
-    window_size=10
+    window_size=10,
+    use_image_data=None
 ):
 
     relay_kitchen_trajectories = RelayKitchenTrajectoryDataset(

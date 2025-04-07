@@ -19,6 +19,7 @@ student_type: latent_entropy_based # latent_entropy_based, unsupervised, Iterati
 query_freq: 3
 num_queries: 1 # number of queries per access to oracle
 randomst_query_percent: 0.2
+query_percentage_budget: 1
 
 # Training details
 num_training_epochs: 1
@@ -37,6 +38,7 @@ seed: 42
 
 # Prior training details
 num_prior_epochs: 100
+num_policy_only_epochs: 100
 eval_prior_every: 1
 save_prior_every: 1
 

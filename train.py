@@ -95,7 +95,8 @@ class Workspace:
         if cfg.student_type=='random':
             self.student.query_percent=cfg.randomst_query_percent
             self.student.student_type=f'query_percent{cfg.randomst_query_percent}'
-        
+        num_sa_pairs = self.train_set.dataset.dataset.masks.sum()
+        self.query_budget = cfg.query_percentage_budget * num_sa_pairs
         self.num_queries = cfg.num_queries
         self.query_freq = cfg.query_freq
 
@@ -191,7 +192,8 @@ class Workspace:
                 self.query_time +=1
                 # import pdb; pdb.set_trace()
                 if not self.student.single_query_only:
-                    if not self.query_time%self.query_freq:
+                    budget_available = self.student._num_queries < self.query_budget
+                    if not self.query_time%self.query_freq and budget_available:
                         trjs_changed = self.student.query_oracle(
                             self.train_set.dataset.dataset.oracle,
                             num_queries=self.num_queries)

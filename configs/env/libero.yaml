@@ -1,7 +1,7 @@
 name: libero-goal-v0
 args: []
 kw_init_option_modelargs: {}
-obs_dim:  137 # 137 or 9 if only joint and gripper states are used.
+obs_dim:  9 # 137 or 9 if only joint and gripper states are used.
 action_dim: 7
 latent_dim: 10
 action_min: null
@@ -18,5 +18,5 @@ dataset_fn:
   _target_: dataloaders.trajectory_loader.get_libero_train_val
   data_directory: /home/liubove/Documents/my-packages/LIBERO/libero/datasets
   window_size: ${window_size}
-  use_image_data: True # Remember to change obs_dim when changing this
+  use_image_data: False # Remember to change obs_dim when changing this
 
