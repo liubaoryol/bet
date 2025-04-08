@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.decomposition import PCA # type: ignore
 import torch # type: ignore
 
-from tinysam import sam_model_registry, SamPredictor # type: ignore
+# from tinysam import sam_model_registry, SamPredictor # type: ignore
 from robomimic.utils.dataset import SequenceDataset # type: ignore
 import robomimic.utils.obs_utils as ObsUtils # type: ignore
 from libero.libero.benchmark import BENCHMARK_MAPPING # type: ignore
