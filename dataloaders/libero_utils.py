@@ -49,11 +49,11 @@ def get_dataset(i, use_image_data, data_directory=DATA_DIRECTORY):
     return dataset
 
 
-def set_sam_encoder():
-    sam = sam_model_registry['vit_t'](checkpoint=TINYSAM)
-    sam.to(device=DEVICE)
-    predictor = SamPredictor(sam)
-    return predictor
+# def set_sam_encoder():
+#     sam = sam_model_registry['vit_t'](checkpoint=TINYSAM)
+#     sam.to(device=DEVICE)
+#     predictor = SamPredictor(sam)
+#     return predictor
 
 
 def get_libero_images_feats(dataset, predictor, pca_agentview, pca_eye_in_hand):

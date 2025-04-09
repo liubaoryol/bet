@@ -22,7 +22,7 @@ use_state_prior: True
 enable_offsets: True
 action_update_every: 1
 flatten_obs: False
-enable_render: True
+enable_render: False
 
 # Plotting setup
 plot_interactions: False
@@ -30,8 +30,8 @@ start_from_seen: True
 record_video: False
 
 # Wandb setup
-project: behavior_transformer_eval
-experiment: kitchen_eval
+project: neurips25_libero_eval
+experiment: libero_eval
 
 hydra:
   job:
