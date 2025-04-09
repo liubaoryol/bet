@@ -4,15 +4,20 @@ from libero.libero import get_default_path_dict
 import os
 import numpy as np
 import gym
-
+os.environ["MUJOCO_GL"] = "disable"
+os.environ["DISPLAY"] = ""
 
 task_order = 0 # can be from {0 .. 21}, default to 0, which is [task 0, 1, 2 ...]
 benchmark_instance = BENCHMARK_MAPPING['libero_goal'](task_order)
 env_args = {'camera_heights': 128,
  'camera_widths': 128,
- 'has_renderer': True,
- 'has_offscreen_renderer': True, 
- 'use_camera_obs': True }
+ 'has_renderer': False,
+ 'has_offscreen_renderer': False, 
+ 'use_camera_obs': False ,
+ 'render': False,
+ 'use_renderer': False,
+ 'renderer': None }
+
 
 # dataset_path = os.path.join(datasets_default_path, benchmark_instance.get_task_demonstration(i))
 # task_i_dataset, shape_meta = get_dataset(

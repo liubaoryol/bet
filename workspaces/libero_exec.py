@@ -1,4 +1,3 @@
-import adept_envs
 import einops
 import gym
 import hydra
