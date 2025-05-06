@@ -13,11 +13,7 @@ env_args = {'camera_heights': 128,
  'camera_widths': 128,
  'has_renderer': False,
  'has_offscreen_renderer': False, 
- 'use_camera_obs': False ,
- 'render': False,
- 'use_renderer': False,
- 'renderer': None }
-
+ 'use_camera_obs': False }
 
 # dataset_path = os.path.join(datasets_default_path, benchmark_instance.get_task_demonstration(i))
 # task_i_dataset, shape_meta = get_dataset(
@@ -58,7 +54,7 @@ class ConcatControlEnv(gym.Env):
         
         self.observation_space = gym.spaces.Box(
            low=-np.inf, high=np.inf, shape=(79,), dtype=np.float32)
-        env_args['has_renderer'] = True
+        # env_args['has_renderer'] = True
 
         # Initialize environments
         self.reset()
