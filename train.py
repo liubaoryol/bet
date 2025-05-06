@@ -3,6 +3,7 @@ from collections import OrderedDict
 from pathlib import Path
 from datetime import datetime
 import time
+import numpy as np
 
 import hydra
 import torch
@@ -97,6 +98,10 @@ class Workspace:
             self.student.student_type=f'query_percent{cfg.randomst_query_percent}'
         num_sa_pairs = self.train_set.dataset.dataset.masks.sum()
         self.query_budget = cfg.query_percentage_budget * num_sa_pairs
+        print('NUMBER OF QUERIES: \n',
+              cfg.query_percentage_budget*100, '%',
+              ' percent of queries, equivalent to ',
+              self.query_budget, 'number of queries')
         self.num_queries = cfg.num_queries
         self.query_freq = cfg.query_freq
 
@@ -193,10 +198,14 @@ class Workspace:
                 # import pdb; pdb.set_trace()
                 if not self.student.single_query_only:
                     budget_available = self.student._num_queries < self.query_budget
-                    if not self.query_time%self.query_freq and budget_available:
-                        trjs_changed = self.student.query_oracle(
-                            self.train_set.dataset.dataset.oracle,
-                            num_queries=self.num_queries)
+                    if not self.query_time%self.query_freq:
+                        
+                        trjs_changed = set(np.random.randint(
+                            len(self.init_data), size=self.num_queries))
+                        if budget_available:
+                            trjs_changed = self.student.query_oracle(
+                                self.train_set.dataset.dataset.oracle,
+                                num_queries=self.num_queries)
                         for traj_num in trjs_changed:
                             self.train_set.dataset.dataset.update_options_of_traj(
                                 self.student,
@@ -292,7 +301,7 @@ class Workspace:
 
                 self.log_append("final_policy_train", len(observations), loss_components)
 
-    def eval_prior(self):
+    def eval_prior(self, id=''):
         with utils.eval_mode(
             self.obs_encoding_net, self.action_ae, self.state_prior, no_grad=True
         ):
@@ -318,7 +327,7 @@ class Workspace:
                         target_latents=latent,
                         return_loss_components=True,
                     )
-                self.log_append("prior_eval", len(observations), loss_components)
+                self.log_append(id + "prior_eval", len(observations), loss_components)
 
                 _, loss2 = self.state_prior.option_model((enc_obs[:, :-1], option[:, :-1]), option[:, 1:])
                 
@@ -326,7 +335,7 @@ class Workspace:
                 targets = F.one_hot(targets.to(torch.int64), num_classes=self.num_options).to(torch.float)
                 loss3 = F.cross_entropy(_.view(-1, _.size(-1)), targets.view(-1, _.size(-1)))
                 loss4 = (gt_option!=option).sum() / option.numel()
-                self.log_append("option_eval", len(observations), {
+                self.log_append(id + "option_eval", len(observations), {
                     'cross_entropy': loss2, 
                     'gt_cross_entropy': loss3,
                     'fwbw_estimation': loss4})
@@ -407,13 +416,14 @@ class Workspace:
             0, self.cfg.num_policy_only_epochs
         )
         self.state_policy_only_iterator.set_description("Training policy only: ")
+        self.epoch_continue = epoch + self.epoch
         for epoch in self.state_policy_only_iterator:
             self.prior_epoch = epoch
             self.train_init_state(epoch)
             self.train_action_policy_from_scratch()  # Trains prior and queries oracle
             if ((self.prior_epoch + 1) % self.cfg.eval_prior_every) == 0:
-                self.eval_prior()
-            self.flush_log(epoch=epoch + self.epoch, iterator=self.state_prior_iterator)
+                self.eval_prior(id='post_option_')
+            self.flush_log(epoch=epoch + self.epoch_continue, iterator=self.state_policy_only_iterator)
             self.prior_epoch += 1
             if ((self.prior_epoch + 1) % self.cfg.save_prior_every) == 0:
                 self.save_snapshot()

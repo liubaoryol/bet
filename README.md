@@ -99,13 +99,14 @@ See below for detailed steps for each environment.
 - Evaluation:
   ```
   export PYTHONPATH=$PYTHONPATH:$(pwd)/relay-policy-learning/adept_envs
-  python3 run_on_env.py --config-name=eval_kitchen
+  python3 run_on_env.py --config-name=eval_kitchen env.load_dir=$(pwd)/exp_remote/kitchen/2025.04.08/030341_kitchen_train
+  2025.04.08/030341_kitchen_train
   ```
   (Evaluation requires including the relay policy learning repo in `PYTHONPATH`.)
 
 
 ### Speeding up evaluation
-- Rendering can be disabled for the kitchen and block pushing environments: set `enable_render: False` in `configs/eval_kitchen.yaml`
+- Rendering can be disabled for the kitchen environment: set `enable_render: False` in `configs/eval_kitchen.yaml`
 
 ### LIBERO
 - Train:
