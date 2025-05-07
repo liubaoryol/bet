@@ -22,7 +22,7 @@ use_state_prior: True
 enable_offsets: True
 action_update_every: 1
 flatten_obs: False
-enable_render: True
+enable_render: False
 
 # Plotting setup
 plot_interactions: False
