@@ -30,7 +30,7 @@ start_from_seen: False
 record_video: False
 
 # Wandb setup
-project: behavior_transformer_eval
+project: neurips25_kitchen20percent_eval
 experiment: kitchen_eval
 
 hydra:
